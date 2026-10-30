@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0B0B0F;
+  --surface: #14141E;
+  --surface-elevated: #1B1B28;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --accent-violet: #8B5CF6;
+  --accent-cyan: #06B6D4;
+}
+
+/* Custom sleek scrollbar for CapCut dark aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* Touch & safe area utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 16px);
+}
+
+/* Glassmorphism surfaces */
+.glass-panel {
+  background: rgba(20, 20, 30, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(27, 27, 40, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glow-signature {
+  box-shadow: 0 0 35px -5px rgba(139, 92, 246, 0.25), 0 0 15px -3px rgba(6, 182, 212, 0.2);
+}
+
+.glow-signature-sm {
+  box-shadow: 0 0 20px -3px rgba(139, 92, 246, 0.2);
+}
+
+.brand-gradient {
+  background: linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%);
+}
+
+.brand-gradient-text {
+  background: linear-gradient(135deg, #A78BFA 0%, #38BDF8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
