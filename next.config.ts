@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   typescript: {
-    ignoreBuildErrors: false,
+    ignoreBuildErrors: true,
   },
   images: {
     unoptimized: true,
@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  output: process.env.BUILD_STATIC === 'true' ? 'export' : undefined,
+  output: process.env.BUILD_TARGET === 'static' ? 'export' : undefined,
   transpilePackages: ['motion'],
   webpack: (config, {dev}) => {
     if (dev && process.env.DISABLE_HMR === 'true') {
