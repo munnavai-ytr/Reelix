@@ -1,10 +1,10 @@
 // 7-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator
-import { PipelineProgressEvent, IngestedMedia } from './types';
+import { PipelineProgressEvent } from './types';
 import { ingestMediaInputs } from './ingest';
 import { transcribeAudio } from '../ai/whisper';
 import { generateDirectorPlan } from '../ai/director';
 import { generateGeminiTtsAudio } from '../ai/gemini';
-import { resolveStockVideos, resolveBackgroundMusic, resolveSoundEffects } from './assets';
+import { resolveStockVideos, resolveBackgroundMusic } from './assets';
 import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { AssetCache } from '../engine/renderer';
 import { ApiKeysService } from '../storage/keys';
@@ -48,9 +48,9 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     imageFiles: opts.imageFiles,
   });
 
-  // If only script is given, synthesize voiceover using Gemini TTS / Speech
   let finalVoiceUrl = ingested.audioUrl;
   let finalDuration = ingested.audioDuration;
+  let voiceBlob = ingested.audioBlob;
 
   if (!finalVoiceUrl && opts.scriptText) {
     onProgress({
@@ -61,7 +61,10 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
       title: 'Generating AI Voiceover',
       detail: `Synthesizing script with voice persona "${opts.voiceName || 'Puck'}"...`,
     });
-    finalVoiceUrl = await generateGeminiTtsAudio(opts.scriptText, opts.voiceName || 'Puck');
+    const ttsRes = await generateGeminiTtsAudio(opts.scriptText, opts.voiceName || 'Puck');
+    finalVoiceUrl = ttsRes.audioUrl;
+    voiceBlob = ttsRes.audioBlob;
+    finalDuration = ttsRes.durationSec;
   }
 
   // STEP 2: TRANSCRIBE
@@ -75,7 +78,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
   });
 
   const transcription = await transcribeAudio(
-    ingested.audioBlob || new Blob([]),
+    voiceBlob || new Blob([]),
     finalDuration,
     opts.scriptText
   );
@@ -90,7 +93,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Detecting visual hooks, facial focus coordinates, and pacing rhythm...',
   });
 
-  await new Promise(r => setTimeout(r, 400)); // micro pause for smooth UI progress transition
+  await new Promise(r => setTimeout(r, 300));
 
   // STEP 4: DIRECTOR
   onProgress({
@@ -133,7 +136,6 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Fetching portrait stock footage, synthesizing SFX, and composing soundtrack...',
   });
 
-  // Resolve Stock Videos for empty video scene slots
   const stockVideos = await resolveStockVideos(directorResult.bRollQueries);
   let stockIdx = 0;
   for (const layer of plan.layers) {
@@ -147,7 +149,6 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     }
   }
 
-  // Resolve Background Beat
   const bgMusicUrl = await resolveBackgroundMusic(opts.style === 'Hype Beast / High Energy' ? 'hype' : 'upbeat', plan.duration);
   const musicLayer = plan.layers.find(l => l.type === 'audio' && (l as AudioLayer).audioType === 'music') as AudioLayer | undefined;
   if (musicLayer) {
@@ -164,13 +165,11 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Buffering video decoders and initializing Web Audio mixer...',
   });
 
-  // Build AssetCache
   const assetCache: AssetCache = {
     videos: new Map(),
     images: new Map(),
   };
 
-  // Preload video elements
   for (const layer of plan.layers) {
     if (layer.type === 'video' && layer.src && !assetCache.videos.has(layer.src)) {
       const v = document.createElement('video');
@@ -188,7 +187,6 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     }
   }
 
-  // Auto-save project to IndexedDB
   await ProjectDb.saveProject({
     id: plan.id,
     title: plan.title,

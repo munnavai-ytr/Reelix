@@ -1,41 +1,88 @@
-// Gemini API Client with Exponential Backoff, Structured JSON, and Multimodal Support
-import { nativeFetch } from './http';
+// Gemini REST Client with dynamic model discovery, backoff retries, JSON schemas, and real TTS
 import { ApiKeysService } from '../storage/keys';
+import { nativeFetch } from './http';
+import { resolveTextModel, resolveTtsModel, invalidateModelCache, isLegacyModel } from './models';
 
-const GEMINI_DIRECTOR_MODEL = 'gemini-2.5-flash';
+export interface GeminiCallOptions {
+  model?: string;
+  kind?: 'text' | 'tts';
+  maxRetries?: number;
+}
 
-async function sleep(ms: number) {
+export interface GeminiCandidate {
+  content?: {
+    parts?: Array<{
+      text?: string;
+      inlineData?: {
+        mimeType: string;
+        data: string; // base64
+      };
+    }>;
+  };
+  finishReason?: string;
+}
+
+export interface GeminiRawResponse {
+  candidates?: GeminiCandidate[];
+  error?: {
+    code: number;
+    message: string;
+    status: string;
+  };
+}
+
+async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export async function callGeminiWithRetry<T = unknown>(
+export async function callGeminiRaw(
   payload: Record<string, unknown>,
-  model: string = GEMINI_DIRECTOR_MODEL,
-  maxRetries: number = 3
-): Promise<T> {
+  options: GeminiCallOptions = {}
+): Promise<GeminiRawResponse> {
   const keys = ApiKeysService.getKeys();
   const apiKey = keys.gemini?.trim();
 
   if (!apiKey) {
-    throw new Error('Gemini API key is missing. Please add it in Settings or Onboarding.');
+    throw new Error('Gemini API key is missing. Please enter your API key in Settings.');
+  }
+
+  const kind = options.kind || 'text';
+  const maxRetries = options.maxRetries ?? 3;
+  let model = options.model;
+
+  if (!model || model === 'auto' || isLegacyModel(model)) {
+    model = kind === 'tts' ? await resolveTtsModel() : await resolveTextModel();
   }
 
   let delay = 1500;
+  let invalidated404 = false;
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res = await nativeFetch<{
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        error?: { code: number; message: string; status: string };
-      }>(url, {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await nativeFetch<GeminiRawResponse>(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify(payload),
       });
 
-      if (res.status === 429) {
+      // Handle 404 (Model deprecated or not found)
+      if (res.status === 404 && !invalidated404) {
+        invalidated404 = true;
+        invalidateModelCache();
+        model = kind === 'tts' ? await resolveTtsModel(true) : await resolveTextModel(undefined, true);
+        await sleep(500);
+        continue;
+      }
+
+      // Handle rate limit or temporary server errors
+      if ([429, 500, 503, 504].includes(res.status)) {
         if (attempt === maxRetries) {
-          throw new Error('Gemini API rate limit exceeded (429). Please wait a moment or check your API quota in Google AI Studio.');
+          throw new Error(`Gemini API error ${res.status}: ${res.data?.error?.message || 'Rate limit or server error'}`);
         }
         await sleep(delay);
         delay *= 2;
@@ -43,16 +90,15 @@ export async function callGeminiWithRetry<T = unknown>(
       }
 
       if (!res.ok) {
-        const errorMsg = res.data?.error?.message || `HTTP ${res.status}: Gemini request failed`;
-        throw new Error(errorMsg);
+        const msg = res.data?.error?.message || `HTTP ${res.status}: Gemini API request failed`;
+        throw new Error(msg);
       }
 
-      const textPart = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!textPart) {
-        throw new Error('Gemini returned an empty response.');
+      if (res.data?.error) {
+        throw new Error(res.data.error.message || 'Gemini returned an error');
       }
 
-      return textPart as unknown as T;
+      return res.data;
     } catch (err: unknown) {
       if (attempt === maxRetries) {
         throw err instanceof Error ? err : new Error('Failed to communicate with Gemini API');
@@ -62,111 +108,215 @@ export async function callGeminiWithRetry<T = unknown>(
     }
   }
 
-  throw new Error('Gemini request failed after multiple retries.');
+  throw new Error('Gemini request failed after retries.');
+}
+
+export async function callGeminiJson<T = unknown>(
+  payload: Record<string, unknown>,
+  schema?: Record<string, unknown>,
+  options: GeminiCallOptions = {}
+): Promise<T> {
+  const existingConfig = (payload.config as Record<string, unknown>) || {};
+  const newConfig: Record<string, unknown> = {
+    ...existingConfig,
+    responseMimeType: 'application/json',
+  };
+
+  if (schema) {
+    newConfig.responseSchema = schema;
+  }
+
+  const finalPayload = {
+    ...payload,
+    config: newConfig,
+  };
+
+  const res = await callGeminiRaw(finalPayload, options);
+  const text = res.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!text) {
+    throw new Error('Gemini API returned an empty text response.');
+  }
+
+  // Clean markdown backticks if present
+  let cleanText = text.trim();
+  if (cleanText.startsWith('```json')) {
+    cleanText = cleanText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+
+  try {
+    return JSON.parse(cleanText) as T;
+  } catch (err) {
+    console.error('Failed to parse Gemini JSON output:', cleanText);
+    throw new Error(`Invalid JSON returned by Gemini: ${(err as Error).message}`);
+  }
+}
+
+// Split text into chunks <= 1800 characters split on sentence boundaries
+function splitTextIntoSentences(text: string, maxLen = 1800): string[] {
+  if (text.length <= maxLen) return [text];
+  
+  const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    if ((currentChunk + sentence).length > maxLen) {
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+      }
+      currentChunk = sentence;
+    } else {
+      currentChunk += sentence;
+    }
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
+export interface TtsResult {
+  audioUrl: string;
+  audioBlob: Blob;
+  durationSec: number;
 }
 
 export async function generateGeminiTtsAudio(
   text: string,
   voiceName: string = 'Puck'
-): Promise<string> {
-  // Check if browser SpeechSynthesis is available for instant zero-latency speech synthesis
-  // and construct an audio blob via Web Audio oscillator / speech synthesis
-  return new Promise((resolve) => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.05; // Slightly punchy Shorts pacing
-      utterance.pitch = 1.0;
+): Promise<TtsResult> {
+  if (!text || !text.trim()) {
+    throw new Error('Speech text cannot be empty');
+  }
 
-      // Select voice if available
-      const voices = window.speechSynthesis.getVoices();
-      const match = voices.find(v => v.name.toLowerCase().includes(voiceName.toLowerCase()) || v.lang.startsWith('en'));
-      if (match) utterance.voice = match;
+  const chunks = splitTextIntoSentences(text.trim());
+  const pcmBuffers: Uint8Array[] = [];
 
-      // Create an audio context to synthesize an actual audio buffer for timeline sync
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const duration = Math.max(3, text.split(' ').length * 0.38); // estimated speech duration
-      const sampleRate = audioCtx.sampleRate;
-      const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
-      const data = buffer.getChannelData(0);
+  for (const chunk of chunks) {
+    const payload = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: chunk }],
+        },
+      ],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
+          },
+        },
+      },
+    };
 
-      // Synthesize clean audio waveform representation
-      for (let i = 0; i < buffer.length; i++) {
-        const t = i / sampleRate;
-        const fundamental = 130 + Math.sin(t * 3) * 20;
-        const envelope = Math.sin((t / duration) * Math.PI) * 0.5;
-        data[i] = Math.sin(2 * Math.PI * fundamental * t) * envelope * 0.15;
-      }
+    const res = await callGeminiRaw(payload, { kind: 'tts' });
+    const part = res.candidates?.[0]?.content?.parts?.[0];
+    const base64Data = part?.inlineData?.data;
 
-      // Convert buffer to wav blob
-      const wavBlob = audioBufferToWav(buffer);
-      const url = URL.createObjectURL(wavBlob);
-      resolve(url);
-    } else {
-      // Fallback silent audio blob
-      const audioCtx = new AudioContext();
-      const buffer = audioCtx.createBuffer(1, 44100 * 3, 44100);
-      resolve(URL.createObjectURL(audioBufferToWav(buffer)));
+    if (!base64Data) {
+      throw new Error('Gemini TTS failed to generate audio output for sentence block.');
     }
-  });
-}
 
-function audioBufferToWav(buffer: AudioBuffer): Blob {
-  const numOfChan = buffer.numberOfChannels;
-  const length = buffer.length * numOfChan * 2 + 44;
-  const out = new DataView(new ArrayBuffer(length));
-  const channels: Float32Array[] = [];
-  let sampleRate = buffer.sampleRate;
+    const binaryStr = atob(base64Data);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    // Gemini unary audio/wav contains a 44-byte WAV header followed by 16-bit 24kHz PCM
+    let pcmData: Uint8Array;
+    if (bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49) {
+      // Valid RIFF header - strip the 44-byte header
+      pcmData = bytes.subarray(44);
+    } else {
+      pcmData = bytes;
+    }
+
+    pcmBuffers.push(pcmData);
+  }
+
+  // Combine all raw PCM buffers
+  let totalPcmBytes = 0;
+  for (const buf of pcmBuffers) {
+    totalPcmBytes += buf.length;
+  }
+
+  const combinedPcm = new Uint8Array(totalPcmBytes);
   let offset = 0;
-  let pos = 0;
+  for (const buf of pcmBuffers) {
+    combinedPcm.set(buf, offset);
+    offset += buf.length;
+  }
 
-  function setUint16(data: number) {
-    out.setUint16(pos, data, true);
-    pos += 2;
-  }
-  function setUint32(data: number) {
-    out.setUint32(pos, data, true);
-    pos += 4;
-  }
+  // Build a standard 44-byte WAV header for 24000 Hz 16-bit mono PCM
+  const sampleRate = 24000;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = combinedPcm.length;
+  const chunkSize = 36 + dataSize;
+
+  const wavHeader = new ArrayBuffer(44);
+  const view = new DataView(wavHeader);
 
   // RIFF identifier
-  setUint32(0x46464952);
-  setUint32(length - 8);
-  setUint32(0x45564157);
-  // fmt chunk
-  setUint32(0x20746d66);
-  setUint32(16);
-  setUint16(1);
-  setUint16(numOfChan);
-  setUint32(sampleRate);
-  setUint32(sampleRate * 2 * numOfChan);
-  setUint16(numOfChan * 2);
-  setUint16(16);
-  // data chunk
-  setUint32(0x61746164);
-  setUint32(length - pos - 4);
+  view.setUint32(0, 0x52494646, false); // "RIFF"
+  view.setUint32(4, chunkSize, true);
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+  // fmt subchunk
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+  view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  // data subchunk
+  view.setUint32(36, 0x64617461, false); // "data"
+  view.setUint32(40, dataSize, true);
 
-  for (let i = 0; i < buffer.numberOfChannels; i++) {
-    channels.push(buffer.getChannelData(i));
-  }
+  const fullWavBytes = new Uint8Array(44 + dataSize);
+  fullWavBytes.set(new Uint8Array(wavHeader), 0);
+  fullWavBytes.set(combinedPcm, 44);
 
-  while (pos < length) {
-    for (let i = 0; i < numOfChan; i++) {
-      let sample = Math.max(-1, Math.min(1, channels[i][offset]));
-      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-      out.setInt16(pos, sample, true);
-      pos += 2;
+  const audioBlob = new Blob([fullWavBytes], { type: 'audio/wav' });
+  const audioUrl = URL.createObjectURL(audioBlob);
+
+  // Decode audio buffer to measure true decoded duration
+  let durationSec = (dataSize / 2) / sampleRate;
+  if (typeof window !== 'undefined' && (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)) {
+    try {
+      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const arrayBuf = await audioBlob.arrayBuffer();
+      const decodedBuf = await audioCtx.decodeAudioData(arrayBuf);
+      durationSec = decodedBuf.duration;
+      await audioCtx.close();
+    } catch (err) {
+      console.warn('AudioContext decoding notice:', err);
     }
-    offset++;
   }
 
-  return new Blob([out.buffer], { type: 'audio/wav' });
+  return { audioUrl, audioBlob, durationSec };
 }
 
+// Compat object wrapper
 export const GeminiClient = {
-  callWithRetry: callGeminiWithRetry,
+  callWithRetry: async <T = unknown>(payload: Record<string, unknown>, model?: string, maxRetries?: number): Promise<T> => {
+    const res = await callGeminiRaw(payload, { model, maxRetries });
+    const text = res.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Gemini returned an empty response.');
+    return text as unknown as T;
+  },
   synthesizeSpeech: async (text: string, voiceName: string = 'Puck'): Promise<Blob> => {
-    const url = await generateGeminiTtsAudio(text, voiceName);
-    const res = await fetch(url);
-    return await res.blob();
+    const result = await generateGeminiTtsAudio(text, voiceName);
+    return result.audioBlob;
   },
 };

@@ -3,23 +3,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldCheck,
-  Sliders,
   Database,
-  Key,
   Terminal,
   Download,
   Upload,
   Trash2,
-  RefreshCw,
   Cpu,
   Check,
   AlertCircle,
-  FileCode,
   Sparkles,
-  Volume2,
   HardDrive,
   Activity,
-  Layers,
   Save,
   Lock,
 } from 'lucide-react';
@@ -28,7 +22,6 @@ import { ApiKeysService, ApiKeys } from '@/storage/keys';
 import { SystemPromptsService, PromptConfig, LogEntry } from '@/storage/system-prompts';
 import { BrandKitService, BrandKitSettings } from '@/storage/brand-kit';
 import { HapticsService } from '@/storage/haptics';
-import { analyzeAudioBlob } from '@/lib/bpm-detector';
 import { OpfsService } from '@/storage/opfs';
 import { ProjectsDB } from '@/storage/db';
 import { DeviceProber, DeviceCapabilities } from '@/lib/device-prober';
@@ -45,7 +38,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   // Library Items state
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [libCategoryFilter, setLibCategoryFilter] = useState<string>('all');
-  const [editingItem, setEditingItem] = useState<LibraryItem | null>(null);
 
   // System Prompts & Model config
   const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
@@ -56,14 +48,12 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   const [brandSaved, setBrandSaved] = useState(false);
 
   // Keys & Telemetry
-  const [keys, setKeys] = useState<ApiKeys>(() => ApiKeysService.getKeys());
   const [logs, setLogs] = useState<LogEntry[]>(() => SystemPromptsService.getLogs());
   const [deviceCaps, setDeviceCaps] = useState<DeviceCapabilities | null>(null);
 
   // File Inputs
   const backupImportInputRef = useRef<HTMLInputElement | null>(null);
   const libraryPackImportInputRef = useRef<HTMLInputElement | null>(null);
-  const bulkAudioInputRef = useRef<HTMLInputElement | null>(null);
 
   // Status banners
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -171,8 +161,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
       await loadAll();
       HapticsService.success();
       showBanner('Backup restored successfully!');
-    } catch (err: any) {
-      showBanner(`Restore failed: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showBanner(`Restore failed: ${(err as Error).message}`, 'error');
     }
   };
 
@@ -211,8 +201,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
       await loadAll();
       HapticsService.success();
       showBanner(`Imported ${pack.items?.length || 0} library items!`);
-    } catch (err: any) {
-      showBanner(`Pack import failed: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showBanner(`Pack import failed: ${(err as Error).message}`, 'error');
     }
   };
 
@@ -247,7 +237,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
 
   return (
     <div className="w-full bg-[#0E0E14] border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-      {/* Top Banner */}
       <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-violet-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-violet-500/20">
@@ -273,7 +262,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
         </button>
       </div>
 
-      {/* Status Alert Banner */}
       {statusMessage && (
         <div
           className={`px-4 py-2 text-xs flex items-center gap-2 ${
@@ -291,7 +279,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
         </div>
       )}
 
-      {/* Tab Navigation */}
       <div className="flex items-center gap-1 p-2 bg-black/40 border-b border-white/5 overflow-x-auto scrollbar-none">
         {[
           { id: 'library', label: 'Library CRUD', icon: <Database className="w-3.5 h-3.5" /> },
@@ -316,9 +303,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
         ))}
       </div>
 
-      {/* Main Tab Views */}
       <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
-        {/* 1. LIBRARY CRUD */}
         {activeTab === 'library' && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -354,7 +339,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               </div>
             </div>
 
-            {/* Category Filter */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               {[
                 'all',
@@ -381,7 +365,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               ))}
             </div>
 
-            {/* Items Table */}
             {filteredItems.length === 0 ? (
               <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl">
                 <Database className="w-8 h-8 text-white/20 mx-auto mb-2" />
@@ -426,7 +409,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {/* 2. SYSTEM PROMPTS & AI MODEL CONFIG */}
         {activeTab === 'prompts' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -446,7 +428,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               </button>
             </div>
 
-            {/* Model Selector */}
             <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2">
               <label className="text-xs font-semibold text-white/70 block">
                 Default AI Model
@@ -456,13 +437,13 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
                 onChange={e => setPromptConfig({ ...promptConfig, selectedModel: e.target.value })}
                 className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white focus:outline-none focus:border-violet-500"
               >
-                <option value="gemini-2.5-flash">gemini-2.5-flash (Fast & Viral - Recommended)</option>
-                <option value="gemini-2.5-pro">gemini-2.5-pro (Deep Reasoning & Complex Shaders)</option>
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Legacy Fallback)</option>
+                <option value="auto">Auto Model Discovery (Recommended)</option>
+                <option value="gemini-3.8-flash">gemini-3.8-flash (Latest General Text)</option>
+                <option value="gemini-3.5-flash">gemini-3.5-flash (Fast Flash)</option>
+                <option value="gemini-4-argon">gemini-4-argon (Complex Logic & Shaders)</option>
               </select>
             </div>
 
-            {/* Director Prompt */}
             <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2">
               <label className="text-xs font-semibold text-white/70 block">
                 Director AI System Prompt
@@ -475,7 +456,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               />
             </div>
 
-            {/* Chat Prompt */}
             <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2">
               <label className="text-xs font-semibold text-white/70 block">
                 Chat-to-Change System Prompt
@@ -488,7 +468,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               />
             </div>
 
-            {/* Creator Prompt */}
             <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2">
               <label className="text-xs font-semibold text-white/70 block">
                 AI Creator Studio System Prompt
@@ -503,7 +482,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {/* 3. BRAND & WATERMARK */}
         {activeTab === 'brand' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -582,7 +560,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {/* 4. HARDWARE PROBER */}
         {activeTab === 'hardware' && (
           <div className="space-y-4">
             <div>
@@ -648,7 +625,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {/* 5. STORAGE & BACKUP */}
         {activeTab === 'storage' && (
           <div className="space-y-4">
             <div>
@@ -710,7 +686,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {/* 6. AI CALL LOGS */}
         {activeTab === 'logs' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">

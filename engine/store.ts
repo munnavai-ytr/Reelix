@@ -1,6 +1,6 @@
 // Zustand Studio Store for Reelix Video Creator & Manual Timeline Editor
 import { create } from 'zustand';
-import { EditPlan, Layer, VideoLayer, TextLayer, CaptionLayer } from './types';
+import { EditPlan, Layer, VideoLayer } from './types';
 import { AssetCache } from './renderer';
 import { PipelineProgressEvent } from '../pipeline/types';
 import { ExportProgress } from '../pipeline/exporter';
@@ -25,6 +25,8 @@ export interface StudioState {
 
   // Actions
   setPlan: (plan: EditPlan) => void;
+  applyPlan: (plan: EditPlan) => void;
+  setAssets: (assets: AssetCache) => void;
   setCurrentTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setSelectedLayerId: (id: string | null) => void;
@@ -77,6 +79,19 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     });
   },
 
+  applyPlan: (plan) => {
+    const { currentPlan, history } = get();
+    const nextHistory = currentPlan ? [...history, currentPlan].slice(-25) : history;
+    set({
+      currentPlan: plan,
+      history: nextHistory,
+      future: [],
+      selectedLayerId: plan.layers[0]?.id || null,
+    });
+  },
+
+  setAssets: (assets) => set({ assets }),
+
   setCurrentTime: (time) => {
     const plan = get().currentPlan;
     const clamped = Math.max(0, Math.min(plan?.duration ?? 300, time));
@@ -109,8 +124,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const { currentPlan, history } = get();
     if (!currentPlan) return;
 
-    // Save history
-    const nextHistory = [...history, currentPlan].slice(-25); // cap at 25 steps
+    const nextHistory = [...history, currentPlan].slice(-25);
 
     const updatedLayers = currentPlan.layers.map((layer) => {
       if (layer.id === layerId) {
@@ -134,7 +148,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    // Auto-save to IndexedDB
     ProjectDb.saveProject({
       id: updatedPlan.id,
       title: updatedPlan.title,
@@ -256,20 +269,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const layerEnd = layer.startTime + layer.duration;
 
     if (currentTime <= layerStart + 0.2 || currentTime >= layerEnd - 0.2) {
-      return; // too close to edge to split
+      return;
     }
 
     const nextHistory = [...history, currentPlan].slice(-25);
     const firstPartDuration = currentTime - layerStart;
     const secondPartDuration = layerEnd - currentTime;
 
-    // First part
     const layer1: Layer = {
       ...layer,
       duration: firstPartDuration,
     };
 
-    // Second part
     const layer2: Layer = {
       ...layer,
       id: `${layer.id}_split_${Date.now()}`,
@@ -313,7 +324,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const [removed] = layers.splice(startIndex, 1);
     layers.splice(endIndex, 0, removed);
 
-    // Reassign trackIndex
     const updatedLayers = layers.map((l, idx) => ({ ...l, trackIndex: idx }));
 
     const updatedPlan: EditPlan = {

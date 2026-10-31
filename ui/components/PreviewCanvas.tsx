@@ -1,12 +1,13 @@
-// Real-Time 9:16 Vertical Video Preview Canvas (Unified Frame Renderer)
+// Real-Time 9:16 Vertical Video Preview Canvas (Unified Frame Renderer with Video Drift Sync)
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useStudioStore } from '../../engine/store';
-import { renderFrame } from '../../engine/renderer';
-import { AudioMixer } from '../../engine/audio-mixer';
-import { Play, Pause, RotateCcw, Maximize2, Sparkles, Volume2, VolumeX } from 'lucide-react';
-import { triggerHaptic } from '../../storage/haptics';
+import { useStudioStore } from '@/engine/store';
+import { renderFrame } from '@/engine/renderer';
+import { AudioMixer } from '@/engine/audio-mixer';
+import { syncPreviewVideos } from '@/engine/media';
+import { Play, Pause, RotateCcw, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { triggerHaptic } from '@/storage/haptics';
 
 export function PreviewCanvas() {
   const {
@@ -26,11 +27,10 @@ export function PreviewCanvas() {
   const [isMuted, setIsMuted] = useState(false);
   const [proxyResolution, setProxyResolution] = useState<'proxy' | 'full'>('proxy');
 
-  // Preview resolution: proxy 540x960 for 60fps smooth playback or full 1080x1920
   const previewWidth = proxyResolution === 'proxy' ? 540 : 1080;
   const previewHeight = proxyResolution === 'proxy' ? 960 : 1920;
 
-  // Initialize AudioMixer
+  // Initialize AudioMixer when plan changes
   useEffect(() => {
     const mixer = new AudioMixer();
     audioMixerRef.current = mixer;
@@ -48,14 +48,14 @@ export function PreviewCanvas() {
     };
   }, [currentPlan]);
 
-  // Unified Frame Draw
   const drawCurrentFrame = useCallback((t: number) => {
     if (!canvasRef.current || !currentPlan) return;
     const ctx = canvasRef.current.getContext('2d', { alpha: false, desynchronized: true });
     if (!ctx) return;
 
     renderFrame(ctx, currentPlan, t, previewWidth, previewHeight, assets);
-  }, [currentPlan, previewWidth, previewHeight, assets]);
+    syncPreviewVideos(currentPlan, t, assets, isPlaying);
+  }, [currentPlan, previewWidth, previewHeight, assets, isPlaying]);
 
   // Main playback animation loop
   useEffect(() => {
@@ -71,10 +71,10 @@ export function PreviewCanvas() {
       const deltaSec = (now - lastTimeRef.current) / 1000;
       lastTimeRef.current = now;
 
-      const nextTime = currentTime + deltaSec;
+      const storeState = useStudioStore.getState();
+      const nextTime = storeState.currentTime + deltaSec;
 
       if (nextTime >= currentPlan.duration) {
-        // Loop or stop
         setCurrentTime(0);
         setIsPlaying(false);
         audioMixerRef.current?.stopAll();
@@ -95,11 +95,9 @@ export function PreviewCanvas() {
 
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      audioMixerRef.current?.stopAll();
     };
-  }, [isPlaying, currentTime, currentPlan, isMuted, drawCurrentFrame, setCurrentTime, setIsPlaying]);
+  }, [isPlaying, currentPlan, isMuted, drawCurrentFrame, setCurrentTime, setIsPlaying]);
 
-  // Redraw when currentTime changes while paused
   useEffect(() => {
     if (!isPlaying) {
       drawCurrentFrame(currentTime);
@@ -132,7 +130,6 @@ export function PreviewCanvas() {
 
   return (
     <div ref={containerRef} className="flex flex-col items-center justify-center p-3 sm:p-4 bg-[#0E0E16] rounded-3xl border border-white/5 shadow-2xl relative">
-      {/* Top indicator bar */}
       <div className="w-full max-w-[340px] sm:max-w-[380px] flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-slate-200 font-semibold">{formatTime(currentTime)}</span>
@@ -164,8 +161,8 @@ export function PreviewCanvas() {
         </div>
       </div>
 
-      {/* 9:16 Vertical Video Canvas Surface */}
-      <div className="relative w-[280px] h-[498px] sm:w-[320px] sm:h-[568px] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-[#0B0B0F] group cursor-pointer"
+      <div
+        className="relative w-[280px] h-[498px] sm:w-[320px] sm:h-[568px] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-[#0B0B0F] group cursor-pointer"
         onClick={togglePlay}
       >
         <canvas
@@ -175,7 +172,6 @@ export function PreviewCanvas() {
           className="w-full h-full object-contain"
         />
 
-        {/* Play icon overlay on hover/pause */}
         {!isPlaying && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[2px] transition-opacity">
             <div className="w-14 h-14 rounded-full brand-gradient flex items-center justify-center shadow-xl shadow-violet-500/30 text-white pl-1 scale-100 group-hover:scale-110 transition-transform">
@@ -185,7 +181,6 @@ export function PreviewCanvas() {
         )}
       </div>
 
-      {/* Transport Scrub Bar */}
       <div className="w-full max-w-[340px] sm:max-w-[380px] space-y-2 mt-3">
         <input
           type="range"

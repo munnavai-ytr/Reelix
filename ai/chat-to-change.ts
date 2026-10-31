@@ -1,11 +1,9 @@
-// Reelix Chat-to-Change Service
-// Applies targeted user voice/text instructions to mutate Edit Plans with AI intelligence
-import { GoogleGenAI } from '@google/genai';
-import { ApiKeysService } from '@/storage/keys';
+// Reelix Chat-to-Change Service - Mutates Edit Plans using dynamic Gemini JSON calls
 import { SystemPromptsService } from '@/storage/system-prompts';
 import { EditPlan } from '@/engine/types';
 import { Registry } from '@/registry';
 import { EditPlanSchema } from '@/engine/schema';
+import { callGeminiJson } from './gemini';
 
 export interface ChatToChangeResult {
   updatedPlan: EditPlan;
@@ -17,15 +15,9 @@ export class ChatToChangeService {
     currentPlan: EditPlan,
     instruction: string
   ): Promise<ChatToChangeResult> {
-    const keys = ApiKeysService.getKeys();
-    if (!keys.gemini) {
-      throw new Error('Gemini API key is required to use Chat-to-Change.');
-    }
-
     const config = SystemPromptsService.getConfig();
     const startTime = Date.now();
     const catalogSummary = Registry.getCatalogSummary();
-    const ai = new GoogleGenAI({ apiKey: keys.gemini });
 
     const systemPrompt = `${config.chatPrompt}
 
@@ -40,42 +32,35 @@ You must output a JSON object with:
 
 CRITICAL RULES:
 - Never corrupt track IDs, layer IDs, or total project duration unless explicitly requested.
-- If the user asks to change font, captions, vibe, effects, or transitions, pick valid IDs from the registry catalog.
-- If the user asks for "bigger captions", increase fontSize in caption layers.
-- If the user asks for "add glitch on hook", attach the "glitch" or "rgb-split" effect to the first 3 seconds of layers.
-- Return ONLY valid JSON.`;
+- If user asks for bigger captions, increase fontSize in caption layers.
+- If user asks for glitch effect, add glitch/rgb-split effect to layer effects.`;
+
+    const payload = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `${systemPrompt}\n\nCurrent Edit Plan:\n${JSON.stringify(currentPlan)}\n\nUser Instruction:\n"${instruction}"`,
+            },
+          ],
+        },
+      ],
+    };
 
     try {
-      const response = await ai.models.generateContent({
-        model: config.selectedModel || 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `${systemPrompt}\n\nCurrent Edit Plan:\n${JSON.stringify(currentPlan)}\n\nUser Instruction:\n"${instruction}"`,
-              },
-            ],
-          },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.4,
-        },
-      });
-
-      const text = response.text || '{}';
-      const parsed = JSON.parse(text);
+      const parsed = await callGeminiJson<{
+        changeSummary: string;
+        updatedPlan: EditPlan;
+      }>(payload, undefined, { kind: 'text' });
 
       if (!parsed.updatedPlan) {
         throw new Error('AI failed to return an updated Edit Plan.');
       }
 
-      // Validate against strict Zod schema
       const validation = EditPlanSchema.safeParse(parsed.updatedPlan);
       let validatedPlan: EditPlan;
       if (!validation.success) {
-        // Fallback auto-healing
         console.warn('Chat-to-Change validation warning, auto-recovering:', validation.error);
         validatedPlan = {
           ...currentPlan,
@@ -88,7 +73,7 @@ CRITICAL RULES:
 
       SystemPromptsService.logCall({
         service: 'chat-to-change',
-        model: config.selectedModel || 'gemini-2.5-flash',
+        model: config.selectedModel || 'auto',
         durationMs: Date.now() - startTime,
         status: 'success',
         summary: parsed.changeSummary || 'Applied user modification',
@@ -98,14 +83,14 @@ CRITICAL RULES:
         updatedPlan: validatedPlan,
         changeSummary: parsed.changeSummary || 'Successfully applied changes to your Short.',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       SystemPromptsService.logCall({
         service: 'chat-to-change',
-        model: config.selectedModel || 'gemini-2.5-flash',
+        model: config.selectedModel || 'auto',
         durationMs: Date.now() - startTime,
         status: 'error',
         summary: 'Failed to apply Chat-to-Change instruction',
-        error: err.message || String(err),
+        error: (err as Error).message || String(err),
       });
       throw err;
     }

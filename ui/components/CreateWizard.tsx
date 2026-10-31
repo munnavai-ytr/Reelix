@@ -11,14 +11,11 @@ import {
   Upload,
   FileText,
   Sparkles,
-  AlertCircle,
   Video,
   Image as ImageIcon,
   Check,
   ChevronDown,
   Layers,
-  Wand2,
-  Volume2,
   Zap,
   Dice5,
   Lightbulb,
@@ -28,9 +25,8 @@ import confetti from 'canvas-confetti';
 import { GamificationService } from '@/storage/gamification';
 
 export function CreateWizard() {
-  const { setPipelineProgress, setPlan, setActiveTab } = useStudioStore();
+  const { setPipelineProgress, setPlan, setAssets, setActiveTab } = useStudioStore();
 
-  // Mode: standard (Voice/Script) vs describe-to-video
   const [creationMode, setCreationMode] = useState<'standard' | 'describe'>('standard');
   const [describePrompt, setDescribePrompt] = useState('');
 
@@ -48,7 +44,7 @@ export function CreateWizard() {
   const [niche, setNiche] = useState('Tech / AI');
   const [style, setStyle] = useState('Viral High Energy');
   const [duration, setDuration] = useState<number | undefined>(30);
-  const [captionStyle, setCaptionStyle] = useState('hormozi-bold');
+  const [captionStyle, setCaptionStyle] = useState('karaoke-word-highlight');
   const [voiceName, setVoiceName] = useState('Puck');
   const [userPrompt, setUserPrompt] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -60,12 +56,10 @@ export function CreateWizard() {
   const animationFrameRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Check validation
   const hasVoice = !!audioFile;
   const hasScript = scriptText.trim().length > 0;
   const canGenerate = creationMode === 'describe' ? describePrompt.trim().length > 3 : (hasVoice || hasScript);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -73,9 +67,7 @@ export function CreateWizard() {
     };
   }, []);
 
-  // Surprise Me: Generates a creative viral combination of inputs
-  const handleSurpriseMe = () => {
-    triggerHaptic('light');
+  const getRandomSurprise = () => {
     const surpriseTopics = [
       'The 3 psychological tricks restaurants use to make you order more food',
       'Why you should never charge your phone to 100% overnight',
@@ -86,19 +78,79 @@ export function CreateWizard() {
     const niches = ['Tech / AI', 'Finance', 'Psychology', 'Productivity', 'Storytelling'];
     const styles = ['Viral High Energy', 'Documentary Film', 'Kinetic Typography', 'Cyberpunk Dark'];
     const voices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede'];
-    const captionStyles = ['hormozi-bold', 'cyber-neon-glow', 'mr-beast-pop', 'clean-minimal-box'];
+    const captionStyles = ['karaoke-word-highlight', 'bold-center', 'neon-glow', 'box-highlight', 'pop'];
 
-    const randomTopic = surpriseTopics[Math.floor(Math.random() * surpriseTopics.length)];
+    return {
+      topic: surpriseTopics[Math.floor(Math.random() * surpriseTopics.length)],
+      niche: niches[Math.floor(Math.random() * niches.length)],
+      style: styles[Math.floor(Math.random() * styles.length)],
+      voice: voices[Math.floor(Math.random() * voices.length)],
+      captionStyle: captionStyles[Math.floor(Math.random() * captionStyles.length)],
+    };
+  };
+
+  const handleSurpriseMe = () => {
+    triggerHaptic('light');
+    const s = getRandomSurprise();
     setCreationMode('describe');
-    setDescribePrompt(randomTopic);
-    setNiche(niches[Math.floor(Math.random() * niches.length)]);
-    setStyle(styles[Math.floor(Math.random() * styles.length)]);
-    setVoiceName(voices[Math.floor(Math.random() * voices.length)]);
-    setCaptionStyle(captionStyles[Math.floor(Math.random() * captionStyles.length)]);
+    setDescribePrompt(s.topic);
+    setNiche(s.niche);
+    setStyle(s.style);
+    setVoiceName(s.voice);
+    setCaptionStyle(s.captionStyle);
     setDuration(30);
   };
 
-  // Handle In-app Microphone Recording
+  const handleMagicButton = async () => {
+    triggerHaptic('heavy');
+    const s = getRandomSurprise();
+    setCreationMode('describe');
+    setDescribePrompt(s.topic);
+    setNiche(s.niche);
+    setStyle(s.style);
+    setVoiceName(s.voice);
+    setCaptionStyle(s.captionStyle);
+
+    try {
+      const project = await DescribeToVideoService.createVideoFromDescription({
+        prompt: s.topic,
+        niche: s.niche,
+        style: s.style,
+        durationSec: 30,
+        voice: s.voice,
+        language: 'auto',
+        onProgress: (step, percent) => {
+          setPipelineProgress({
+            step: 'director',
+            stepIndex: 4,
+            totalSteps: 6,
+            percentage: percent,
+            title: step,
+            detail: `${percent}% complete`,
+          });
+        },
+      });
+
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#8B5CF6', '#06B6D4', '#FBBF24'],
+      });
+
+      GamificationService.recordAction('use_template');
+
+      setTimeout(() => {
+        setPipelineProgress(null);
+        setPlan(project.editPlan);
+        setActiveTab('editor');
+      }, 600);
+    } catch (err: unknown) {
+      setPipelineProgress(null);
+      alert(`Magic Button Error: ${(err as Error).message}`);
+    }
+  };
+
   const startRecording = async () => {
     triggerHaptic('medium');
     try {
@@ -107,7 +159,6 @@ export function CreateWizard() {
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
-      // Audio visualizer setup
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
       audioCtxRef.current = audioCtx;
@@ -173,7 +224,6 @@ export function CreateWizard() {
     }
   };
 
-  // Timer for active recording
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isRecording) {
@@ -184,7 +234,6 @@ export function CreateWizard() {
     return () => clearInterval(interval);
   }, [isRecording]);
 
-  // Handle Audio File Upload
   const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -194,7 +243,6 @@ export function CreateWizard() {
     }
   };
 
-  // Handle Video Clips Upload
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       triggerHaptic('light');
@@ -202,7 +250,6 @@ export function CreateWizard() {
     }
   };
 
-  // Handle Images Upload
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       triggerHaptic('light');
@@ -210,13 +257,11 @@ export function CreateWizard() {
     }
   };
 
-  // Primary 1-Click Generation Trigger
   const handleGenerate = async () => {
     if (!canGenerate) return;
     triggerHaptic('heavy');
 
     try {
-      // 1. If Describe-to-Video mode
       if (creationMode === 'describe') {
         const project = await DescribeToVideoService.createVideoFromDescription({
           prompt: describePrompt,
@@ -254,7 +299,6 @@ export function CreateWizard() {
         return;
       }
 
-      // 2. Standard Voice / Script Pipeline
       const res = await runGeneratePipeline({
         audioFile: audioFile || undefined,
         scriptText: scriptText.trim() || undefined,
@@ -281,10 +325,10 @@ export function CreateWizard() {
 
       GamificationService.recordAction('use_template');
 
-      // Finish generation
       setTimeout(() => {
         setPipelineProgress(null);
         setPlan(res.plan);
+        setAssets(res.assets);
         setActiveTab('editor');
       }, 600);
     } catch (err: unknown) {
@@ -296,7 +340,6 @@ export function CreateWizard() {
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6 pb-24">
-      {/* Title Hero & Quick Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2.5">
@@ -306,7 +349,7 @@ export function CreateWizard() {
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Turn voice audio, written scripts, or just a single text concept into a polished Short with AI.
+            Turn voice audio, written scripts, or a text concept into a polished Short with AI.
           </p>
         </div>
 
@@ -322,10 +365,7 @@ export function CreateWizard() {
 
           <button
             type="button"
-            onClick={() => {
-              handleSurpriseMe();
-              setTimeout(() => handleGenerate(), 200);
-            }}
+            onClick={handleMagicButton}
             className="px-4 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 text-xs font-bold text-white shadow-lg shadow-violet-500/20 flex items-center gap-1.5 transition-all"
           >
             <Zap className="w-3.5 h-3.5" />
@@ -334,7 +374,6 @@ export function CreateWizard() {
         </div>
       </div>
 
-      {/* Mode Switcher: Describe Concept vs Voice/Script */}
       <div className="flex items-center gap-2 p-1.5 bg-white/5 rounded-2xl border border-white/5 w-fit">
         <button
           type="button"
@@ -361,7 +400,6 @@ export function CreateWizard() {
         </button>
       </div>
 
-      {/* DESCRIBE-TO-VIDEO MODE CONTAINER */}
       {creationMode === 'describe' && (
         <div className="p-6 rounded-3xl glass-card border border-violet-500/30 bg-violet-950/10 space-y-4">
           <div className="flex items-center gap-2">
@@ -369,7 +407,7 @@ export function CreateWizard() {
             <h3 className="text-sm font-bold text-white">Describe Your Short Concept</h3>
           </div>
           <p className="text-xs text-white/60 leading-relaxed">
-            The AI Director will automatically write a viral script with a 3-second hook, synthesize voiceover with Gemini TTS, select high-definition B-roll, and build the timeline.
+            The AI Director will write a script with a 3-second hook, synthesize voiceover with Gemini TTS, select B-roll, and assemble the timeline.
           </p>
 
           <textarea
@@ -388,11 +426,11 @@ export function CreateWizard() {
                 onChange={(e) => setVoiceName(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
               >
-                <option value="Puck">Puck (Energetic / Viral Male)</option>
-                <option value="Charon">Charon (Deep / Authoritative)</option>
-                <option value="Kore">Kore (Warm / Engaging Female)</option>
-                <option value="Fenrir">Fenrir (Intense / Bold)</option>
-                <option value="Aoede">Aoede (Clear / Professional)</option>
+                <option value="Puck">Puck (Energetic Male)</option>
+                <option value="Charon">Charon (Deep Authoritative)</option>
+                <option value="Kore">Kore (Warm Female)</option>
+                <option value="Fenrir">Fenrir (Intense Bold)</option>
+                <option value="Aoede">Aoede (Clear Professional)</option>
               </select>
             </div>
 
@@ -411,26 +449,25 @@ export function CreateWizard() {
             </div>
 
             <div>
-              <label className="text-xs text-white/60 mb-1 block">Caption Theme</label>
+              <label className="text-xs text-white/60 mb-1 block">Caption Style</label>
               <select
                 value={captionStyle}
                 onChange={(e) => setCaptionStyle(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
               >
-                <option value="hormozi-bold">Hormozi Bold (Yellow Pop)</option>
-                <option value="cyber-neon-glow">Cyber Neon (Cyan Glow)</option>
-                <option value="mr-beast-pop">Mr. Beast (Stroked Bounce)</option>
-                <option value="clean-minimal-box">Minimal Black Box</option>
+                <option value="karaoke-word-highlight">Karaoke Word Glow</option>
+                <option value="bold-center">Viral Bold Center</option>
+                <option value="neon-glow">Cyber Neon Glow</option>
+                <option value="box-highlight">Color Box Badge</option>
+                <option value="pop">Bouncy Word Pop</option>
               </select>
             </div>
           </div>
         </div>
       )}
 
-      {/* STANDARD VOICE / SCRIPT MODE */}
       {creationMode === 'standard' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Input Card 1: Voice Audio */}
           <div className={`p-5 rounded-3xl glass-card border transition-all ${
             hasVoice ? 'border-violet-500/40 bg-violet-950/10' : 'border-white/5'
           }`}>
@@ -449,7 +486,6 @@ export function CreateWizard() {
             </div>
 
             <div className="space-y-4">
-              {/* Live Mic Recording Button */}
               {!isRecording ? (
                 <button
                   type="button"
@@ -480,7 +516,6 @@ export function CreateWizard() {
 
               <div className="text-center text-[10px] text-slate-500 uppercase font-mono tracking-wider">— OR UPLOAD AUDIO —</div>
 
-              {/* Audio File Upload */}
               <label className="flex flex-col items-center justify-center p-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-colors">
                 <Upload className="w-5 h-5 text-slate-400 mb-1" />
                 <span className="text-xs font-medium text-slate-300">
@@ -491,7 +526,6 @@ export function CreateWizard() {
             </div>
           </div>
 
-          {/* Input Card 2: Script Text */}
           <div className={`p-5 rounded-3xl glass-card border transition-all ${
             hasScript ? 'border-cyan-500/40 bg-cyan-950/10' : 'border-white/5'
           }`}>
@@ -512,7 +546,7 @@ export function CreateWizard() {
             <div className="space-y-2">
               <textarea
                 rows={5}
-                placeholder="Type or paste your voiceover script here. If no audio is attached, Gemini TTS will automatically generate voiceover..."
+                placeholder="Type or paste your voiceover script here. If no audio is attached, Gemini TTS will generate voiceover..."
                 value={scriptText}
                 onChange={(e) => setScriptText(e.target.value)}
                 className="w-full p-3.5 rounded-2xl bg-[#0B0B0F] border border-white/10 text-white text-xs placeholder:text-slate-400 focus:outline-none focus:border-cyan-500 transition-colors resize-none leading-relaxed"
@@ -539,7 +573,6 @@ export function CreateWizard() {
         </div>
       )}
 
-      {/* Advanced Settings Accordion */}
       <div className="rounded-3xl glass-card border border-white/5 overflow-hidden">
         <button
           type="button"
@@ -580,7 +613,7 @@ export function CreateWizard() {
                   className="w-full px-3 py-2.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
                 >
                   <option value="Viral High Energy">Viral High Energy (CapCut cuts)</option>
-                  <option value="Documentary Film">Cinematic Documentary (Film grain)</option>
+                  <option value="Documentary Film">Cinematic Documentary</option>
                   <option value="Kinetic Typography">Kinetic Bold Typography</option>
                   <option value="Cyberpunk Dark">Cyberpunk Dark (RGB / Glitch)</option>
                 </select>
@@ -602,7 +635,17 @@ export function CreateWizard() {
               </div>
             </div>
 
-            {/* Custom Media Clips / Images Upload */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Describe What You Want (Free Text Prompt)</label>
+              <textarea
+                rows={2}
+                value={userPrompt}
+                onChange={(e) => setUserPrompt(e.target.value)}
+                placeholder="e.g. 'Add zoom punches on key words, dark cinematic lighting, high-contrast yellow captions'"
+                className="w-full p-3 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500 resize-none"
+              />
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
@@ -630,7 +673,6 @@ export function CreateWizard() {
         )}
       </div>
 
-      {/* GENERATE ACTION BUTTON */}
       <div className="pt-2">
         <button
           type="button"

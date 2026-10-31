@@ -2,13 +2,10 @@
 
 import React, { useState } from 'react';
 import {
-  MessageSquare,
   Mic,
   MicOff,
   Send,
-  Sparkles,
   RotateCcw,
-  Check,
   Zap,
 } from 'lucide-react';
 import { useStudioStore } from '@/engine/store';
@@ -20,7 +17,7 @@ interface ChatToChangePanelProps {
 }
 
 export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose }) => {
-  const { currentPlan, setPlan, undo, redo, history } = useStudioStore();
+  const { currentPlan, applyPlan, undo, history } = useStudioStore();
   const canUndo = history.length > 0;
   const [inputPrompt, setInputPrompt] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,7 +32,7 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
   const quickSuggestions = [
     'Make captions bigger and bolder',
     'Add glitch effect on hook',
-    'Change caption style to Hormozi',
+    'Change caption style to Karaoke Glow',
     'Speed up pacing by 20%',
     'Add subtle film grain',
   ];
@@ -51,15 +48,15 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
 
     try {
       const result = await ChatToChangeService.applyInstruction(currentPlan, text);
-      setPlan(result.updatedPlan);
+      applyPlan(result.updatedPlan);
       setMessages(prev => [...prev, { sender: 'ai', text: result.changeSummary }]);
       HapticsService.success();
-    } catch (err: any) {
+    } catch (err: unknown) {
       setMessages(prev => [
         ...prev,
         {
           sender: 'ai',
-          text: `⚠️ Error: ${err.message || 'Could not apply change. Check Gemini API key in Settings.'}`,
+          text: `⚠️ Error: ${(err as Error).message || 'Could not apply change. Check Gemini API key in Settings.'}`,
         },
       ]);
       HapticsService.warning();
@@ -68,10 +65,10 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
     }
   };
 
-  // Web Speech recognition for voice command
   const handleToggleVoiceRecord = () => {
     if (typeof window === 'undefined') return;
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert('Speech recognition is not supported in this browser. Please type your instruction.');
       return;
@@ -112,7 +109,6 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
 
   return (
     <div className="flex flex-col h-full bg-[#0E0E14] text-white rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-      {/* Top Header */}
       <div className="p-3 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg bg-violet-600/30 border border-violet-500/30 flex items-center justify-center">
@@ -145,7 +141,6 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
         </div>
       </div>
 
-      {/* Message History */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {messages.map((m, idx) => (
           <div
@@ -172,7 +167,6 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
         )}
       </div>
 
-      {/* Quick Suggestion Pills */}
       <div className="px-3 py-1 flex items-center gap-1.5 overflow-x-auto scrollbar-none border-t border-white/5">
         {quickSuggestions.map((sug, i) => (
           <button
@@ -186,7 +180,6 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
         ))}
       </div>
 
-      {/* Input Bar */}
       <div className="p-2.5 border-t border-white/5 bg-black/40 flex items-center gap-1.5">
         <button
           onClick={handleToggleVoiceRecord}

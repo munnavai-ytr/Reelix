@@ -26,19 +26,12 @@ export function renderFrame(
   const scaleRatioX = targetWidth / 1080;
   const scaleRatioY = targetHeight / 1920;
 
-  // Scale the entire coordinate space to canonical 1080x1920 for consistent layout
   ctx.scale(scaleRatioX, scaleRatioY);
 
   const CANONICAL_W = 1080;
   const CANONICAL_H = 1920;
 
-  // Sort layers by trackIndex ascending
   const sortedLayers = [...plan.layers].sort((a, b) => a.trackIndex - b.trackIndex);
-
-  // Check for active transitions
-  const activeTransitions = plan.transitions.filter(
-    tr => currentTime >= tr.duration && false // helper: transitions usually occur around clip cut points
-  );
 
   for (const layer of sortedLayers) {
     if (!isLayerActive(layer, currentTime)) continue;
@@ -46,7 +39,6 @@ export function renderFrame(
     const layerRelTime = currentTime - layer.startTime;
     const layerProgress = Math.max(0, Math.min(1, layerRelTime / Math.max(0.01, layer.duration)));
 
-    // Calculate layer transform and opacity
     let opacity = layer.opacity ?? 1;
     if (layer.keyframes?.opacity) {
       opacity = interpolateKeyframe(layer.keyframes.opacity, layerRelTime, opacity);
@@ -66,15 +58,15 @@ export function renderFrame(
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
 
-    // Base layer transform from canvas center
+    // Base layer transform from canvas center with exact x/y translation offset
     const originX = CANONICAL_W / 2 + posX;
     const originY = CANONICAL_H / 2 + posY;
     ctx.translate(originX, originY);
     if (rotation !== 0) ctx.rotate((rotation * Math.PI) / 180);
     if (scale !== 1) ctx.scale(scale, scale);
-    ctx.translate(-originX, -originY);
+    ctx.translate(-CANONICAL_W / 2, -CANONICAL_H / 2);
 
-    // Apply pre-draw layer effects (e.g., zoom punch, shake)
+    // Apply pre-draw layer effects
     if (layer.effects && layer.effects.length > 0) {
       for (const eff of layer.effects) {
         if (!eff.enabled) continue;
@@ -106,7 +98,7 @@ export function renderFrame(
         break;
     }
 
-    // Apply post-draw layer effects (e.g., vignette, film grain, glow, glitch)
+    // Apply post-draw layer effects
     if (layer.effects && layer.effects.length > 0) {
       for (const eff of layer.effects) {
         if (!eff.enabled) continue;
@@ -135,12 +127,10 @@ function renderVideoLayer(
 ) {
   const video = assets.videos.get(layer.src);
   if (!video || video.readyState < 2) {
-    // Elegant procedural placeholder while loading
     drawProceduralVideoPlaceholder(ctx, layer.name, canvasW, canvasH);
     return;
   }
 
-  // Draw video centered covering the 9:16 frame
   const vw = video.videoWidth || 1080;
   const vh = video.videoHeight || 1920;
   const videoAspect = vw / vh;
@@ -162,7 +152,6 @@ function renderVideoLayer(
       offsetX = (canvasW - drawW) / 2;
     }
   } else {
-    // Cover with focal point reframing
     if (videoAspect > canvasAspect) {
       drawH = canvasH;
       drawW = canvasH * videoAspect;
@@ -201,7 +190,6 @@ function renderImageLayer(
   let panX = 0;
   let panY = 0;
 
-  // Ken Burns zoom/pan
   if (layer.kenBurns?.enabled) {
     const kb = layer.kenBurns;
     scale = kb.startScale + (kb.endScale - kb.startScale) * progress;
@@ -295,7 +283,6 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
   ctx.textAlign = layer.textAlign ?? 'center';
   ctx.textBaseline = 'middle';
 
-  // Background box if present
   if (layer.backgroundColor) {
     const metrics = ctx.measureText(renderedText);
     const pad = layer.backgroundPadding ?? 16;
@@ -309,7 +296,6 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
     ctx.restore();
   }
 
-  // Stroke
   if (layer.strokeColor && layer.strokeWidth) {
     ctx.lineJoin = 'round';
     ctx.miterLimit = 2;
@@ -324,7 +310,6 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
 }
 
 function renderCaptionLayer(ctx: CanvasRenderingContext2D, layer: CaptionLayer, currentTime: number, canvasW: number, canvasH: number) {
-  // Find current chunk
   const activeChunk = layer.chunks.find(c => currentTime >= c.start && currentTime <= c.end);
   if (!activeChunk) return;
 
@@ -349,14 +334,21 @@ function drawProceduralVideoPlaceholder(ctx: CanvasRenderingContext2D, title: st
   ctx.save();
   const grad = ctx.createLinearGradient(0, 0, width, height);
   grad.addColorStop(0, '#13131F');
-  grad.addColorStop(1, '#08080C');
+  grad.addColorStop(0.5, '#1B142D');
+  grad.addColorStop(1, '#0B0B14');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.font = '600 36px Inter, sans-serif';
+  ctx.strokeStyle = 'rgba(139, 92, 246, 0.15)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(width / 2, height / 2, 140, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '700 32px Inter, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(title || 'Video Track', width / 2, height / 2);
+  ctx.fillText(title || 'Reelix B-Roll Track', width / 2, height / 2);
   ctx.restore();
 }

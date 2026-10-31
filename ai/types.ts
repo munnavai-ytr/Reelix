@@ -21,6 +21,7 @@ export interface DirectorResult {
   bRollQueries: string[];
   sfxQueries: string[];
   directorNotes: string;
+  notices?: string[];
 }
 
 export interface TtsOptions {

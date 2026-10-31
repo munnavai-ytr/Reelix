@@ -47,7 +47,7 @@ export class SystemPromptsService {
   static getConfig(): PromptConfig {
     if (typeof window === 'undefined') {
       return {
-        selectedModel: 'gemini-2.5-flash',
+        selectedModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
@@ -56,17 +56,21 @@ export class SystemPromptsService {
     const raw = localStorage.getItem(PROMPT_CONFIG_KEY);
     if (!raw) {
       return {
-        selectedModel: 'gemini-2.5-flash',
+        selectedModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
       };
     }
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (!parsed.selectedModel || parsed.selectedModel === 'gemini-2.5-flash' || parsed.selectedModel === 'gemini-1.5-flash') {
+        parsed.selectedModel = 'auto';
+      }
+      return parsed;
     } catch {
       return {
-        selectedModel: 'gemini-2.5-flash',
+        selectedModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
@@ -99,7 +103,6 @@ export class SystemPromptsService {
       ...entry,
     };
     logs.unshift(newEntry);
-    // Keep last 50 logs
     if (logs.length > 50) logs.length = 50;
     localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(logs));
   }

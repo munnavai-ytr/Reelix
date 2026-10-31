@@ -1,8 +1,5 @@
-// Reelix Describe-to-Video Engine
-// Converts a single text prompt into a full vertical Short with script, TTS, B-roll, and Edit Plan
-import { GoogleGenAI } from '@google/genai';
-import { ApiKeysService } from '@/storage/keys';
-import { GeminiClient } from './gemini';
+// Reelix Describe-to-Video Engine - Converts text concept into a full vertical Short
+import { generateGeminiTtsAudio, callGeminiJson } from './gemini';
 import { PipelineRunner } from '@/pipeline/pipeline';
 import { ProjectRecord } from '@/storage/db';
 
@@ -20,11 +17,6 @@ export class DescribeToVideoService {
   static async createVideoFromDescription(
     options: DescribeToVideoOptions
   ): Promise<ProjectRecord> {
-    const keys = ApiKeysService.getKeys();
-    if (!keys.gemini) {
-      throw new Error('Gemini API key is required for Describe-to-Video.');
-    }
-
     const {
       prompt,
       niche = 'general',
@@ -36,7 +28,6 @@ export class DescribeToVideoService {
     } = options;
 
     onProgress('Generating viral script from concept...', 15);
-    const ai = new GoogleGenAI({ apiKey: keys.gemini });
 
     const scriptPrompt = `Write an ultra-engaging 9:16 vertical Short script based on this concept:
 "${prompt}"
@@ -58,44 +49,36 @@ Requirements:
   "visualKeywords": ["keyword1", "keyword2", "keyword3", "keyword4"]
 }`;
 
-    const scriptRes = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: scriptPrompt }] }],
-      config: { responseMimeType: 'application/json' },
-    });
+    const schema = {
+      type: 'OBJECT',
+      properties: {
+        title: { type: 'STRING' },
+        script: { type: 'STRING' },
+        visualKeywords: { type: 'ARRAY', items: { type: 'STRING' } },
+      },
+      required: ['title', 'script'],
+    };
 
-    const parsedScript = JSON.parse(scriptRes.text || '{}');
+    const parsedScript = await callGeminiJson<{
+      title?: string;
+      script?: string;
+      visualKeywords?: string[];
+    }>({ contents: [{ parts: [{ text: scriptPrompt }] }] }, schema, { kind: 'text' });
+
     const scriptText = parsedScript.script || prompt;
     const title = parsedScript.title || prompt.slice(0, 30);
 
     onProgress('Synthesizing studio voiceover with Gemini TTS...', 35);
-    let voiceBlob: Blob;
-    try {
-      voiceBlob = await GeminiClient.synthesizeSpeech(scriptText, voice);
-    } catch (ttsErr) {
-      console.warn('Gemini TTS fallback, generating speech audio blob:', ttsErr);
-      // Create a clean silent audio buffer as fallback so pipeline continues smoothly
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioCtx();
-      const length = Math.max(1, Math.round(durationSec * ctx.sampleRate));
-      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-      // Add subtle hum so duration is accurate
-      const channel = buffer.getChannelData(0);
-      for (let i = 0; i < length; i++) {
-        channel[i] = Math.sin((i / ctx.sampleRate) * 440 * 2 * Math.PI) * 0.001;
-      }
-      voiceBlob = new Blob([new Uint8Array(44 + length * 2)], { type: 'audio/wav' });
-      await ctx.close().catch(() => {});
-    }
+    const ttsResult = await generateGeminiTtsAudio(scriptText, voice);
 
     onProgress('Directing edit plan, B-roll & synchronized captions...', 60);
     const project = await PipelineRunner.run({
       script: scriptText,
-      voiceAudioBlob: voiceBlob,
+      voiceAudioBlob: ttsResult.audioBlob,
       niche,
       style,
-      targetDuration: durationSec,
-      captionStyle: 'hormozi-bold',
+      targetDuration: ttsResult.durationSec || durationSec,
+      captionStyle: 'karaoke-word-highlight',
       promptDescription: `${prompt}. Visual cues: ${(parsedScript.visualKeywords || []).join(', ')}`,
       language,
       onProgress: (pStep, pPct) => {

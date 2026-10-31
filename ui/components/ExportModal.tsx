@@ -5,7 +5,7 @@ import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { useStudioStore } from '@/engine/store';
 import { exportVideoMp4, downloadOrShareVideo, ExportProgress } from '@/pipeline/exporter';
-import { Download, Share2, Sparkles, X, CheckCircle2, Film, Shield, Sliders } from 'lucide-react';
+import { Download, Share2, Sparkles, X, CheckCircle2, Film, Shield } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { triggerHaptic } from '@/storage/haptics';
 import { BrandKitService } from '@/storage/brand-kit';
@@ -17,8 +17,8 @@ export function ExportModal() {
     setIsExporting,
     currentPlan,
     assets,
-    exportProgress,
     setExportProgress,
+    exportProgress,
     exportedBlob,
     setExportedBlob,
   } = useStudioStore();
@@ -45,7 +45,7 @@ export function ExportModal() {
       const clonedPlan = JSON.parse(JSON.stringify(currentPlan));
       clonedPlan.fps = fpsPreset;
 
-      // If watermark requested, add watermark text layer
+      // Add watermark layer if enabled
       if (includeWatermark) {
         const brand = BrandKitService.getSettings();
         clonedPlan.layers.push({
@@ -55,12 +55,12 @@ export function ExportModal() {
           startTime: 0,
           duration: clonedPlan.duration,
           text: brand.watermarkText || 'Reelix',
-          fontSize: 24,
+          fontSize: 28,
           fontFamily: brand.defaultFontFamily || 'Inter, sans-serif',
-          color: 'rgba(255,255,255,0.7)',
+          color: 'rgba(255, 255, 255, 0.75)',
           transform: {
-            x: 880,
-            y: 80,
+            x: 360,
+            y: -860,
             scale: 1,
             rotation: 0,
             opacity: brand.watermarkOpacity || 0.8,
@@ -71,22 +71,34 @@ export function ExportModal() {
         });
       }
 
-      const blob = await exportVideoMp4(clonedPlan, assets, (progress: ExportProgress) => {
-        if (abortControllerRef.current) {
-          throw new Error('Export cancelled by user');
+      const [w, h] = resolutionPreset === '720x1280' ? [720, 1280] : [1080, 1920];
+      const bitrateMap = { high: 12_000_000, medium: 8_000_000, draft: 4_000_000 };
+      const bitrate = bitrateMap[qualityPreset];
+
+      const blob = await exportVideoMp4(
+        clonedPlan,
+        assets,
+        (progress: ExportProgress) => {
+          if (abortControllerRef.current) {
+            throw new Error('Export cancelled by user');
+          }
+          setExportProgress(progress);
+        },
+        {
+          width: w,
+          height: h,
+          fps: fpsPreset,
+          bitrate,
         }
-        setExportProgress(progress);
-      });
+      );
 
       setExportedBlob(blob);
       setDownloadUrl(URL.createObjectURL(blob));
       setIsProcessing(false);
       triggerHaptic('success');
 
-      // Add XP & record export action in gamification
       GamificationService.recordAction('export_video');
 
-      // Trigger celebratory confetti
       confetti({
         particleCount: 90,
         spread: 60,
@@ -123,10 +135,8 @@ export function ExportModal() {
         exit={{ scale: 0.9, opacity: 0 }}
         className="w-full max-w-md rounded-3xl bg-[#141420] border border-white/10 shadow-2xl p-6 space-y-5 relative overflow-hidden"
       >
-        {/* Ambient glow */}
         <div className="absolute top-0 right-0 w-48 h-48 bg-violet-600/20 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Modal Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl brand-gradient flex items-center justify-center shadow-lg shadow-violet-500/20">
@@ -145,7 +155,6 @@ export function ExportModal() {
           </button>
         </div>
 
-        {/* Presets Selector */}
         {!isProcessing && !exportedBlob && (
           <div className="space-y-3">
             <div>
@@ -157,11 +166,11 @@ export function ExportModal() {
                   { res: '1080x1920', fps: 30, label: '1080p 30fps' },
                   { res: '1080x1920', fps: 60, label: '1080p 60fps' },
                   { res: '720x1280', fps: 30, label: '720p 30fps' },
-                ].map(p => {
+                ].map((p, idx) => {
                   const active = resolutionPreset === p.res && fpsPreset === p.fps;
                   return (
                     <button
-                      key={p.label}
+                      key={idx}
                       onClick={() => {
                         setResolutionPreset(p.res as any);
                         setFpsPreset(p.fps as any);
@@ -204,7 +213,6 @@ export function ExportModal() {
               </div>
             </div>
 
-            {/* Watermark Toggle */}
             <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/5">
               <div className="flex items-center gap-2">
                 <Shield className="w-4 h-4 text-violet-400" />
@@ -220,7 +228,6 @@ export function ExportModal() {
           </div>
         )}
 
-        {/* Video Specs Banner */}
         <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1.5 text-xs">
           <div className="flex justify-between text-slate-300">
             <span>Target Resolution</span>
@@ -240,7 +247,6 @@ export function ExportModal() {
           </div>
         </div>
 
-        {/* Progress Display */}
         {isProcessing && exportProgress && (
           <div className="space-y-2">
             <div className="flex justify-between text-xs font-mono">
@@ -269,7 +275,6 @@ export function ExportModal() {
           </div>
         )}
 
-        {/* Complete State */}
         {exportedBlob && downloadUrl && (
           <div className="space-y-3">
             <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3 text-emerald-300 text-xs">
@@ -290,7 +295,6 @@ export function ExportModal() {
           </div>
         )}
 
-        {/* Action Buttons */}
         <div className="space-y-2 pt-1">
           {!exportedBlob ? (
             <button
