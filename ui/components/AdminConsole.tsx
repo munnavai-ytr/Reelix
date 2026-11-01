@@ -26,6 +26,7 @@ import { OpfsService } from '@/storage/opfs';
 import { ProjectsDB } from '@/storage/db';
 import { DeviceProber, DeviceCapabilities } from '@/lib/device-prober';
 import { getFilteredModelLists, FormattedModelOption } from '@/ai/models';
+import { toast, promptConfirm } from './Toast';
 
 interface AdminConsoleProps {
   onLock: () => void;
@@ -210,12 +211,19 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   };
 
   // Delete Library Item
-  const handleDeleteItem = async (id: string) => {
-    if (confirm('Delete this item from Library?')) {
-      await LibraryDB.deleteItem(id);
-      await loadAll();
-      showBanner('Item deleted from Library.');
-    }
+  const handleDeleteItem = (id: string) => {
+    promptConfirm({
+      title: 'Delete Library Item',
+      message: 'Delete this item from Library? This action cannot be undone.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        await LibraryDB.deleteItem(id);
+        await loadAll();
+        showBanner('Item deleted from Library.');
+        toast.info('Item deleted');
+      },
+    });
   };
 
   // Clear Logs
@@ -226,11 +234,18 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   };
 
   // Clear Cache
-  const handleClearCache = async () => {
-    if (confirm('Clear temporary audio cache and asset blobs?')) {
-      await OpfsService.clearAll();
-      showBanner('Asset cache purged successfully.');
-    }
+  const handleClearCache = () => {
+    promptConfirm({
+      title: 'Purge Asset Cache',
+      message: 'Clear temporary audio cache and asset blobs from OPFS storage?',
+      confirmLabel: 'Purge',
+      isDestructive: true,
+      onConfirm: async () => {
+        await OpfsService.clearAll();
+        showBanner('Asset cache purged successfully.');
+        toast.success('Asset cache purged');
+      },
+    });
   };
 
   const filteredItems = libraryItems.filter(item => {

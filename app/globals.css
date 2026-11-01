@@ -1,15 +1,134 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0B0B0F;
-  --surface: #14141E;
-  --surface-elevated: #1B1B28;
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --accent-violet: #8B5CF6;
-  --accent-cyan: #06B6D4;
+  --ink: #0A0A10;
+  --panel: #12121C;
+  --panel-2: #191927;
+  --line: #26263A;
+  --text: #EDEDF7;
+  --mute: #8D8DA8;
+  --violet: #8B5CF6;
+  --cyan: #22D3EE;
+  --amber: #FBBF24;
+  --rose: #FB7185;
+  --mint: #34D399;
+  --grad: linear-gradient(135deg, #8B5CF6, #22D3EE);
+
+  /* Specific Layer Color Tokens */
+  --layer-video: #5B3FB8;
+  --layer-voice: #0F7F8F;
+  --layer-captions: #B8741A;
+  --layer-music: #2B7A55;
+  --layer-sfx: #A1394F;
+  --layer-text: #7A3FA0;
+  --layer-images: #2B5FA0;
 }
 
-/* Custom sleek scrollbar for CapCut dark aesthetic */
+/* Base Body Styles */
+body {
+  background-color: var(--ink);
+  color: var(--text);
+  font-family: var(--font-sans), var(--font-bengali), -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.5;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, .font-heading {
+  font-family: var(--font-heading), var(--font-bengali), sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bengali Typography Optimization */
+:lang(bn), .font-bengali {
+  font-family: var(--font-bengali), var(--font-sans), sans-serif;
+  line-height: 1.6;
+}
+
+/* Touch & Safe Area Utilities */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+}
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 16px);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Minimum 44px Touch Target */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Visible Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Gradient Classes */
+.brand-gradient {
+  background: var(--grad);
+}
+
+.brand-gradient-text {
+  background: linear-gradient(135deg, #A78BFA 0%, #22D3EE 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Glass & Surface Classes */
+.bg-ink {
+  background-color: var(--ink);
+}
+
+.bg-panel {
+  background-color: var(--panel);
+}
+
+.bg-panel-2 {
+  background-color: var(--panel-2);
+}
+
+.border-line {
+  border-color: var(--line);
+}
+
+.glass-panel {
+  background: rgba(18, 18, 28, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--line);
+}
+
+.glass-card {
+  background: rgba(25, 25, 39, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+}
+
+.glass-dock {
+  background: rgba(21, 21, 34, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 20px -2px rgba(139, 92, 246, 0.15);
+}
+
+/* Sleek Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -18,50 +137,21 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* Touch & safe area utilities */
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 16px);
-}
-.pt-safe {
-  padding-top: env(safe-area-inset-top, 16px);
-}
-
-/* Glassmorphism surfaces */
-.glass-panel {
-  background: rgba(20, 20, 30, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.glass-card {
-  background: rgba(27, 27, 40, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.glow-signature {
-  box-shadow: 0 0 35px -5px rgba(139, 92, 246, 0.25), 0 0 15px -3px rgba(6, 182, 212, 0.2);
-}
-
-.glow-signature-sm {
-  box-shadow: 0 0 20px -3px rgba(139, 92, 246, 0.2);
-}
-
-.brand-gradient {
-  background: linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%);
-}
-
-.brand-gradient-text {
-  background: linear-gradient(135deg, #A78BFA 0%, #38BDF8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+/* Respect Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Flame,
 } from 'lucide-react';
+import { toast, promptConfirm } from './Toast';
 import { Registry } from '@/registry';
 import { LibraryDB, LibraryItem, LibraryCategory } from '@/storage/library-db';
 import { HapticsService } from '@/storage/haptics';
@@ -96,7 +97,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({ onSelectItem, onOpenCrea
         setOnlineSounds(results);
       }
     } catch (err: any) {
-      alert(err.message || 'Sound search failed. Please check API keys in Settings.');
+      toast.error(err.message || 'Sound search failed. Please check API keys in Settings.');
     } finally {
       setIsSearchingOnline(false);
     }
@@ -151,12 +152,19 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({ onSelectItem, onOpenCrea
   };
 
   // Delete My Item
-  const handleDeleteMyItem = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteMyItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Delete this item from My Items?')) {
-      await LibraryDB.deleteItem(id);
-      await loadDbItems();
-    }
+    promptConfirm({
+      title: 'Delete Library Item',
+      message: 'Are you sure you want to delete this item from My Items?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        await LibraryDB.deleteItem(id);
+        toast.info('Item deleted');
+        await loadDbItems();
+      },
+    });
   };
 
   // Bulk Audio Import with Web Audio BPM detection and Gemini mood tagging
@@ -203,7 +211,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({ onSelectItem, onOpenCrea
     setImportStatus('');
     await loadDbItems();
     HapticsService.success();
-    alert(`Successfully imported and analyzed ${importedCount} audio track(s) with real BPM detection!`);
+    toast.success(`Successfully imported and analyzed ${importedCount} audio track(s) with real BPM detection!`);
   };
 
   // Gather items to display

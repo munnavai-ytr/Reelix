@@ -8,6 +8,7 @@ import { SystemPromptsService, PromptConfig } from '../../storage/system-prompts
 import { getFilteredModelLists, invalidateModelCache, FormattedModelOption } from '../../ai/models';
 import { Key, Shield, CheckCircle2, AlertCircle, Sparkles, Lock, Unlock, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { triggerHaptic } from '../../storage/haptics';
+import { toast } from './Toast';
 
 export function SettingsModal() {
   const [keys, setKeys] = useState<ApiKeys>(() => ApiKeysService.getKeys());
@@ -49,7 +50,7 @@ export function SettingsModal() {
     triggerHaptic('success');
     ApiKeysService.saveKeys(keys);
     SystemPromptsService.saveConfig(promptConfig);
-    alert('Settings saved successfully!');
+    toast.success('Settings saved successfully!');
   };
 
   const handleModelChange = (key: 'selectedModel', val: string) => {

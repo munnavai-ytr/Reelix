@@ -1,30 +1,44 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Noto_Sans_Bengali } from 'next/font/google';
+import { Bricolage_Grotesque, Manrope, JetBrains_Mono, Hind_Siliguri } from 'next/font/google';
 import './globals.css';
+import { BRAND } from '@/ui/brand';
 
-const inter = Inter({
+const fontHeading = Bricolage_Grotesque({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-heading',
   display: 'swap',
 });
 
-const notoSansBengali = Noto_Sans_Bengali({
+const fontSans = Manrope({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+});
+
+const fontMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+});
+
+const fontBengali = Hind_Siliguri({
   subsets: ['bengali'],
+  weight: ['400', '500', '600', '700'],
   variable: '--font-bengali',
   display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: 'Reelix - AI Vertical Shorts Studio',
+  title: `${BRAND.appName} — ${BRAND.tagline}`,
   description: 'AI-powered one-click vertical Shorts (1080x1920) video creator and editor with real-time canvas preview, Whisper transcription, Gemini Director engine, and WebCodecs MP4 export.',
   openGraph: {
-    title: 'Reelix - AI Vertical Shorts Studio',
+    title: `${BRAND.appName} — ${BRAND.tagline}`,
     description: 'AI-powered one-click vertical Shorts (1080x1920) video creator and editor with real-time canvas preview, Whisper transcription, Gemini Director engine, and WebCodecs MP4 export.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Reelix - AI Vertical Shorts Studio',
+    title: `${BRAND.appName} — ${BRAND.tagline}`,
     description: 'AI-powered one-click vertical Shorts (1080x1920) video creator and editor with real-time canvas preview, Whisper transcription, Gemini Director engine, and WebCodecs MP4 export.',
   },
 };
@@ -35,7 +49,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#0B0B0F',
+  themeColor: '#0A0A10',
 };
 
 export default function RootLayout({
@@ -45,7 +59,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${notoSansBengali.variable} font-sans antialiased bg-[#0B0B0F] text-slate-100 min-h-screen selection:bg-violet-500/30 selection:text-white`} suppressHydrationWarning>
+      <body
+        className={`${fontHeading.variable} ${fontSans.variable} ${fontMono.variable} ${fontBengali.variable} font-sans antialiased bg-[#0A0A10] text-[#EDEDF7] min-h-[100dvh] selection:bg-violet-500/30 selection:text-white`}
+        suppressHydrationWarning
+      >
         {children}
       </body>
     </html>

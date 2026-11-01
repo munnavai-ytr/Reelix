@@ -6,6 +6,7 @@ import { ProjectDb, ProjectRecord } from '../../storage/db';
 import { useStudioStore } from '../../engine/store';
 import { Film, Play, Trash2, Copy, Plus, Clock } from 'lucide-react';
 import { triggerHaptic } from '../../storage/haptics';
+import { toast, promptConfirm } from './Toast';
 
 function createDuplicatedRecord(project: ProjectRecord): ProjectRecord {
   const timestamp = Date.now();
@@ -60,13 +61,20 @@ export function ProjectList() {
     setActiveTab('editor');
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     triggerHaptic('heavy');
-    if (confirm('Delete this project?')) {
-      await ProjectDb.deleteProject(id);
-      loadProjects();
-    }
+    promptConfirm({
+      title: 'Delete Project',
+      message: 'Are you sure you want to delete this project? This action cannot be undone.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        await ProjectDb.deleteProject(id);
+        toast.info('Project deleted');
+        loadProjects();
+      },
+    });
   };
 
   const handleDuplicate = async (e: React.MouseEvent, project: ProjectRecord) => {

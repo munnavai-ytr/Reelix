@@ -11,6 +11,7 @@ import {
 import { useStudioStore } from '@/engine/store';
 import { ChatToChangeService } from '@/ai/chat-to-change';
 import { HapticsService } from '@/storage/haptics';
+import { toast } from './Toast';
 
 interface ChatToChangePanelProps {
   onClose?: () => void;
@@ -70,7 +71,7 @@ export const ChatToChangePanel: React.FC<ChatToChangePanelProps> = ({ onClose })
     const SpeechRecognition = (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please type your instruction.');
+      toast.info('Speech recognition is not supported in this browser. Please type your instruction.');
       return;
     }
 

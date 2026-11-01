@@ -21,6 +21,7 @@ import { LibraryDB } from '@/storage/library-db';
 import { HapticsService } from '@/storage/haptics';
 import { GamificationService } from '@/storage/gamification';
 import { ShaderEngine } from '@/registry/shader-engine';
+import { toast } from './Toast';
 
 interface AiCreatorStudioProps {
   initialType?: CreatorItemType;
@@ -134,7 +135,7 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
       setShaderStatus({ valid: result.shaderValid, error: result.shaderError });
       HapticsService.success();
     } catch (err: any) {
-      alert(err.message || 'Generation failed. Please verify your Gemini API key in Settings.');
+      toast.error(err.message || 'Generation failed. Please verify your Gemini API key in Settings.');
     } finally {
       setIsGenerating(false);
     }
@@ -154,7 +155,7 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
       setChatTweakPrompt('');
       HapticsService.success();
     } catch (err: any) {
-      alert(err.message || 'Tweak failed');
+      toast.error(err.message || 'Tweak failed');
     } finally {
       setIsTweaking(false);
     }

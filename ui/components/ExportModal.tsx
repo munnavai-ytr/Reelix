@@ -10,6 +10,7 @@ import confetti from 'canvas-confetti';
 import { triggerHaptic } from '@/storage/haptics';
 import { BrandKitService } from '@/storage/brand-kit';
 import { GamificationService } from '@/storage/gamification';
+import { toast } from './Toast';
 
 export function ExportModal() {
   const {
@@ -109,7 +110,7 @@ export function ExportModal() {
       setIsProcessing(false);
       const msg = err instanceof Error ? err.message : 'Export failed.';
       if (msg !== 'Export cancelled by user') {
-        alert(`Export Error: ${msg}`);
+        toast.error(`Export Error: ${msg}`);
       }
     }
   };
