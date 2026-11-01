@@ -1,11 +1,13 @@
-// 3-Screen Onboarding Modal with Live Gemini Key Testing
+// 3-Screen Onboarding Modal with Live Gemini Key Testing & Model Selection
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStudioStore } from '../../engine/store';
 import { ApiKeysService } from '../../storage/keys';
-import { Key, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Video, Shield } from 'lucide-react';
+import { SystemPromptsService, PromptConfig } from '../../storage/system-prompts';
+import { getFilteredModelLists, invalidateModelCache, FormattedModelOption } from '../../ai/models';
+import { Key, Sparkles, CheckCircle2, AlertCircle, ArrowRight, Video, Shield, RefreshCw } from 'lucide-react';
 import { triggerHaptic } from '../../storage/haptics';
 
 export function OnboardingModal() {
@@ -14,6 +16,32 @@ export function OnboardingModal() {
   const [geminiKey, setGeminiKey] = useState('');
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
+  const [textModelOptions, setTextModelOptions] = useState<FormattedModelOption[]>([]);
+  const [ttsModelOptions, setTtsModelOptions] = useState<FormattedModelOption[]>([]);
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+
+  useEffect(() => {
+    const keys = ApiKeysService.getKeys();
+    if (keys.gemini) {
+      setGeminiKey(keys.gemini);
+    }
+  }, []);
+
+  const loadModels = async (force = false) => {
+    setIsRefreshingModels(true);
+    try {
+      if (force) invalidateModelCache();
+      const { textModels, ttsModels } = await getFilteredModelLists(force);
+      setTextModelOptions(textModels);
+      setTtsModelOptions(ttsModels);
+    } catch (err) {
+      console.warn('Failed to load dynamic model list in onboarding:', err);
+    } finally {
+      setIsRefreshingModels(false);
+    }
+  };
 
   if (!showOnboarding) return null;
 
@@ -29,9 +57,17 @@ export function OnboardingModal() {
     if (res.success) {
       triggerHaptic('success');
       ApiKeysService.saveKeys({ gemini: geminiKey.trim() });
+      await loadModels(true);
     } else {
       triggerHaptic('error');
     }
+  };
+
+  const handleModelChange = (key: 'selectedModel' | 'selectedTtsModel', val: string) => {
+    triggerHaptic('light');
+    const updated = { ...promptConfig, [key]: val };
+    setPromptConfig(updated);
+    SystemPromptsService.saveConfig({ [key]: val });
   };
 
   const handleFinish = () => {
@@ -39,6 +75,7 @@ export function OnboardingModal() {
     if (geminiKey.trim()) {
       ApiKeysService.saveKeys({ gemini: geminiKey.trim() });
     }
+    SystemPromptsService.saveConfig(promptConfig);
     setShowOnboarding(false);
     setActiveTab('create');
   };
@@ -129,7 +166,7 @@ export function OnboardingModal() {
             </motion.div>
           )}
 
-          {/* SCREEN 2: GEMINI API KEY & LIVE TEST */}
+          {/* SCREEN 2: GEMINI API KEY & LIVE TEST & MODEL SELECTION */}
           {step === 2 && (
             <motion.div
               key="step2"
@@ -147,7 +184,7 @@ export function OnboardingModal() {
               </h2>
 
               <p className="text-xs text-slate-300 leading-relaxed">
-                Reelix uses Gemini 2.5 / 3.8 Flash to structure viral edit plans, analyze video clips, and synthesize voiceovers. Keys are saved strictly in your local device storage.
+                Reelix uses Gemini Flash models to structure viral edit plans, analyze video clips, and synthesize voiceovers. Keys are saved strictly in your local device storage.
               </p>
 
               <div className="space-y-2 pt-2">
@@ -199,7 +236,60 @@ export function OnboardingModal() {
                 </div>
               )}
 
-              <div className="flex items-center gap-3 pt-4">
+              {/* Model Selectors in Onboarding */}
+              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>AI Model Selection</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => loadModels(true)}
+                    disabled={isRefreshingModels || !geminiKey.trim()}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 disabled:opacity-30"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] text-slate-400 mb-1 block">Text Model</label>
+                    <select
+                      value={promptConfig.selectedModel || 'auto'}
+                      onChange={e => handleModelChange('selectedModel', e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+                    >
+                      <option value="auto">Auto (recommended)</option>
+                      {textModelOptions.map(m => (
+                        <option key={m.name} value={m.name}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 mb-1 block">Voice (TTS) Model</label>
+                    <select
+                      value={promptConfig.selectedTtsModel || 'auto'}
+                      onChange={e => handleModelChange('selectedTtsModel', e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+                    >
+                      <option value="auto">Auto (recommended)</option>
+                      {ttsModelOptions.map(m => (
+                        <option key={m.name} value={m.name}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Free tier: use a Flash or Flash-Lite model. Pro models may be paid-only. Auto picks the best working Flash model.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
                 <button
                   onClick={() => setStep(1)}
                   className="px-4 py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-medium transition-colors"
@@ -212,6 +302,7 @@ export function OnboardingModal() {
                     if (geminiKey.trim()) {
                       ApiKeysService.saveKeys({ gemini: geminiKey.trim() });
                     }
+                    SystemPromptsService.saveConfig(promptConfig);
                     setStep(3);
                   }}
                   className="flex-1 py-3 rounded-2xl brand-gradient text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 active:scale-95 transition-all"

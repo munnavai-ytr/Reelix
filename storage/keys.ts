@@ -1,5 +1,7 @@
 // Storage and real test validators for API keys
 import { nativeFetch } from '../ai/http';
+import { fetchRemoteModelsWithDetail, resolveTextModel, resolveTtsModel } from '../ai/models';
+import { callGeminiRaw } from '../ai/gemini';
 
 export interface ApiKeys {
   gemini: string;
@@ -41,23 +43,38 @@ export const ApiKeysService = {
   async testGemini(apiKey: string): Promise<{ success: boolean; message: string }> {
     const key = apiKey.trim();
     if (!key) return { success: false, message: 'Please enter a Gemini API key' };
-    
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
-      const res = await nativeFetch<{ candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; error?: { message: string } }>(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Respond with exactly: OK' }] }],
-          generationConfig: { maxOutputTokens: 10 }
-        })
-      });
 
-      if (res.ok && res.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return { success: true, message: 'Gemini API connected successfully! (Model: Gemini 2.5/3.8 Flash)' };
+    // Save temporary key so callGeminiRaw & resolveTextModel can access it
+    this.saveKeys({ gemini: key });
+
+    // Step 1: List models via GET /v1beta/models (header x-goog-api-key)
+    const remote = await fetchRemoteModelsWithDetail(key);
+    if (remote.error) {
+      return { success: false, message: remote.error };
+    }
+
+    try {
+      // Step 2: Resolve active text and voice models
+      const textModel = await resolveTextModel(undefined, true);
+      const ttsModel = await resolveTtsModel(true);
+
+      // Step 3: Send tiny generateContent test call
+      const res = await callGeminiRaw(
+        {
+          contents: [{ parts: [{ text: 'Respond with exactly: OK' }] }],
+          generationConfig: { maxOutputTokens: 10 },
+        },
+        { model: textModel, maxRetries: 1 }
+      );
+
+      const reply = res.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (reply || res.candidates?.[0]) {
+        return {
+          success: true,
+          message: `Connected. Text model: ${textModel} | Voice model: ${ttsModel}`,
+        };
       } else {
-        const errorMsg = res.data?.error?.message || `HTTP ${res.status}: Invalid response`;
-        return { success: false, message: errorMsg };
+        return { success: false, message: 'Gemini API returned an invalid response structure.' };
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error testing Gemini API';

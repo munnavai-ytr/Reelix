@@ -25,6 +25,7 @@ import { HapticsService } from '@/storage/haptics';
 import { OpfsService } from '@/storage/opfs';
 import { ProjectsDB } from '@/storage/db';
 import { DeviceProber, DeviceCapabilities } from '@/lib/device-prober';
+import { getFilteredModelLists, FormattedModelOption } from '@/ai/models';
 
 interface AdminConsoleProps {
   onLock: () => void;
@@ -42,6 +43,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   // System Prompts & Model config
   const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
   const [promptsSaved, setPromptsSaved] = useState(false);
+  const [adminTextModels, setAdminTextModels] = useState<FormattedModelOption[]>([]);
+  const [adminTtsModels, setAdminTtsModels] = useState<FormattedModelOption[]>([]);
 
   // Brand Kit settings
   const [brandKit, setBrandKit] = useState<BrandKitSettings>(() => BrandKitService.getSettings());
@@ -72,10 +75,12 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
 
   useEffect(() => {
     let isMounted = true;
-    Promise.all([LibraryDB.getAllItems(), DeviceProber.probe()]).then(([items, caps]) => {
+    Promise.all([LibraryDB.getAllItems(), DeviceProber.probe(), getFilteredModelLists()]).then(([items, caps, models]) => {
       if (isMounted) {
         setLibraryItems(items);
         setDeviceCaps(caps);
+        setAdminTextModels(models.textModels);
+        setAdminTtsModels(models.ttsModels);
       }
     });
     return () => {
@@ -428,19 +433,46 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2">
-              <label className="text-xs font-semibold text-white/70 block">
-                Default AI Model
-              </label>
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-white/70 block">
+                  Default AI Text Model
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const { textModels, ttsModels } = await getFilteredModelLists(true);
+                    setAdminTextModels(textModels);
+                    setAdminTtsModels(ttsModels);
+                  }}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold"
+                >
+                  Refresh list
+                </button>
+              </div>
               <select
-                value={promptConfig.selectedModel}
+                value={promptConfig.selectedModel || 'auto'}
                 onChange={e => setPromptConfig({ ...promptConfig, selectedModel: e.target.value })}
                 className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white focus:outline-none focus:border-violet-500"
               >
                 <option value="auto">Auto Model Discovery (Recommended)</option>
-                <option value="gemini-3.8-flash">gemini-3.8-flash (Latest General Text)</option>
-                <option value="gemini-3.5-flash">gemini-3.5-flash (Fast Flash)</option>
-                <option value="gemini-4-argon">gemini-4-argon (Complex Logic & Shaders)</option>
+                {adminTextModels.map(m => (
+                  <option key={m.name} value={m.name}>{m.label}</option>
+                ))}
+              </select>
+
+              <label className="text-xs font-semibold text-white/70 block pt-2 border-t border-white/5">
+                Default Voice (TTS) Model
+              </label>
+              <select
+                value={promptConfig.selectedTtsModel || 'auto'}
+                onChange={e => setPromptConfig({ ...promptConfig, selectedTtsModel: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white focus:outline-none focus:border-violet-500"
+              >
+                <option value="auto">Auto Model Discovery (Recommended)</option>
+                {adminTtsModels.map(m => (
+                  <option key={m.name} value={m.name}>{m.label}</option>
+                ))}
               </select>
             </div>
 

@@ -1,7 +1,8 @@
 // Gemini REST Client with dynamic model discovery, backoff retries, JSON schemas, and real TTS
 import { ApiKeysService } from '../storage/keys';
+import { SystemPromptsService } from '../storage/system-prompts';
 import { nativeFetch } from './http';
-import { resolveTextModel, resolveTtsModel, invalidateModelCache, isLegacyModel } from './models';
+import { resolveTextModel, resolveTtsModel, invalidateModelCache } from './models';
 
 export interface GeminiCallOptions {
   model?: string;
@@ -50,12 +51,63 @@ export async function callGeminiRaw(
   const maxRetries = options.maxRetries ?? 3;
   let model = options.model;
 
-  if (!model || model === 'auto' || isLegacyModel(model)) {
+  if (!model || model === 'auto') {
     model = kind === 'tts' ? await resolveTtsModel() : await resolveTextModel();
   }
 
+  // --- SAFETY NET FOR REST API PAYLOAD ---
+  const cleanedPayload: Record<string, unknown> = { ...payload };
+
+  // 1. Move 'config' -> 'generationConfig'
+  if ('config' in cleanedPayload && cleanedPayload.config && typeof cleanedPayload.config === 'object') {
+    const cfg = cleanedPayload.config as Record<string, unknown>;
+    const existingGen = (cleanedPayload.generationConfig as Record<string, unknown>) || {};
+    cleanedPayload.generationConfig = { ...cfg, ...existingGen };
+    delete cleanedPayload.config;
+  }
+
+  // 2. Normalize systemInstruction to top-level { systemInstruction: { parts: [{ text: ... }] } }
+  let sysText: string | undefined = undefined;
+  if ('system_instruction' in cleanedPayload && cleanedPayload.system_instruction) {
+    const sys = cleanedPayload.system_instruction;
+    delete cleanedPayload.system_instruction;
+    if (typeof sys === 'string') sysText = sys;
+    else if (typeof sys === 'object') sysText = (sys as any).text || JSON.stringify(sys);
+  }
+
+  if (cleanedPayload.generationConfig && (cleanedPayload.generationConfig as Record<string, unknown>).systemInstruction) {
+    const sys = (cleanedPayload.generationConfig as Record<string, unknown>).systemInstruction;
+    delete (cleanedPayload.generationConfig as Record<string, unknown>).systemInstruction;
+    if (typeof sys === 'string') sysText = sys;
+    else if (typeof sys === 'object') sysText = (sys as any).text || JSON.stringify(sys);
+  }
+
+  if (sysText) {
+    cleanedPayload.systemInstruction = {
+      parts: [{ text: sysText }],
+    };
+  }
+
+  // 3. Move top-level temperature / responseSchema / responseMimeType inside generationConfig
+  const genConfig = (cleanedPayload.generationConfig as Record<string, unknown>) || {};
+  if ('temperature' in cleanedPayload) {
+    genConfig.temperature = cleanedPayload.temperature;
+    delete cleanedPayload.temperature;
+  }
+  if ('responseSchema' in cleanedPayload) {
+    genConfig.responseSchema = cleanedPayload.responseSchema;
+    delete cleanedPayload.responseSchema;
+  }
+  if ('responseMimeType' in cleanedPayload) {
+    genConfig.responseMimeType = cleanedPayload.responseMimeType;
+    delete cleanedPayload.responseMimeType;
+  }
+  if (Object.keys(genConfig).length > 0) {
+    cleanedPayload.generationConfig = genConfig;
+  }
+
   let delay = 1500;
-  let invalidated404 = false;
+  let resetAttempted = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -67,13 +119,24 @@ export async function callGeminiRaw(
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cleanedPayload),
       });
 
-      // Handle 404 (Model deprecated or not found)
-      if (res.status === 404 && !invalidated404) {
-        invalidated404 = true;
+      const errMsg = res.data?.error?.message || '';
+
+      // Handle 404 / 403 / "no longer available" -> Reset user's choice to 'auto' & retry
+      if ((res.status === 404 || res.status === 403 || errMsg.toLowerCase().includes('no longer available')) && !resetAttempted) {
+        resetAttempted = true;
+        console.warn(`Model ${model} returned ${res.status} ("${errMsg}"). Resetting selection to 'auto' and retrying once.`);
+        const sysCfg = SystemPromptsService.getConfig();
+        if (kind === 'tts') {
+          sysCfg.selectedTtsModel = 'auto';
+        } else {
+          sysCfg.selectedModel = 'auto';
+        }
+        SystemPromptsService.saveConfig(sysCfg);
         invalidateModelCache();
+
         model = kind === 'tts' ? await resolveTtsModel(true) : await resolveTextModel(undefined, true);
         await sleep(500);
         continue;
@@ -82,7 +145,7 @@ export async function callGeminiRaw(
       // Handle rate limit or temporary server errors
       if ([429, 500, 503, 504].includes(res.status)) {
         if (attempt === maxRetries) {
-          throw new Error(`Gemini API error ${res.status}: ${res.data?.error?.message || 'Rate limit or server error'}`);
+          throw new Error(`Gemini API error ${res.status}: ${errMsg || 'Rate limit or server error'}`);
         }
         await sleep(delay);
         delay *= 2;
@@ -90,7 +153,7 @@ export async function callGeminiRaw(
       }
 
       if (!res.ok) {
-        const msg = res.data?.error?.message || `HTTP ${res.status}: Gemini API request failed`;
+        const msg = errMsg || `HTTP ${res.status}: Gemini API request failed`;
         throw new Error(msg);
       }
 
@@ -116,19 +179,21 @@ export async function callGeminiJson<T = unknown>(
   schema?: Record<string, unknown>,
   options: GeminiCallOptions = {}
 ): Promise<T> {
-  const existingConfig = (payload.config as Record<string, unknown>) || {};
-  const newConfig: Record<string, unknown> = {
-    ...existingConfig,
+  const existingGen = (payload.generationConfig as Record<string, unknown>) || {};
+  const { config: _drop, ...rest } = payload;
+
+  const newGenConfig: Record<string, unknown> = {
+    ...existingGen,
     responseMimeType: 'application/json',
   };
 
   if (schema) {
-    newConfig.responseSchema = schema;
+    newGenConfig.responseSchema = schema;
   }
 
   const finalPayload = {
-    ...payload,
-    config: newConfig,
+    ...rest,
+    generationConfig: newGenConfig,
   };
 
   const res = await callGeminiRaw(finalPayload, options);
@@ -205,7 +270,7 @@ export async function generateGeminiTtsAudio(
           parts: [{ text: chunk }],
         },
       ],
-      config: {
+      generationConfig: {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {

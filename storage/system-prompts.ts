@@ -1,4 +1,5 @@
 // Reelix System Prompts, AI Model Selection & Telemetry Logs
+import { isLegacyModel } from '../ai/models';
 
 export interface LogEntry {
   id: string;
@@ -13,6 +14,7 @@ export interface LogEntry {
 
 export interface PromptConfig {
   selectedModel: string;
+  selectedTtsModel: string;
   directorPrompt: string;
   chatPrompt: string;
   creatorPrompt: string;
@@ -48,6 +50,7 @@ export class SystemPromptsService {
     if (typeof window === 'undefined') {
       return {
         selectedModel: 'auto',
+        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
@@ -57,20 +60,30 @@ export class SystemPromptsService {
     if (!raw) {
       return {
         selectedModel: 'auto',
+        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
       };
     }
     try {
-      const parsed = JSON.parse(raw);
-      if (!parsed.selectedModel || parsed.selectedModel === 'gemini-2.5-flash' || parsed.selectedModel === 'gemini-1.5-flash') {
+      if (!parsed.selectedModel || isLegacyModel(parsed.selectedModel)) {
         parsed.selectedModel = 'auto';
       }
-      return parsed;
+      if (!parsed.selectedTtsModel || isLegacyModel(parsed.selectedTtsModel)) {
+        parsed.selectedTtsModel = 'auto';
+      }
+      return {
+        selectedModel: parsed.selectedModel || 'auto',
+        selectedTtsModel: parsed.selectedTtsModel || 'auto',
+        directorPrompt: parsed.directorPrompt || DEFAULT_DIRECTOR_PROMPT,
+        chatPrompt: parsed.chatPrompt || DEFAULT_CHAT_PROMPT,
+        creatorPrompt: parsed.creatorPrompt || DEFAULT_CREATOR_PROMPT,
+      };
     } catch {
       return {
         selectedModel: 'auto',
+        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
@@ -78,9 +91,11 @@ export class SystemPromptsService {
     }
   }
 
-  static saveConfig(cfg: PromptConfig): void {
+  static saveConfig(cfg: Partial<PromptConfig>): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(PROMPT_CONFIG_KEY, JSON.stringify(cfg));
+    const current = this.getConfig();
+    const updated = { ...current, ...cfg };
+    localStorage.setItem(PROMPT_CONFIG_KEY, JSON.stringify(updated));
   }
 
   static getLogs(): LogEntry[] {

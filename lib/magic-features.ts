@@ -1,11 +1,12 @@
 // Reelix Magic Features Engine
 // Vibe Slider, Remix x3, Hook Lab, Beat Sync, Style Steal, and Surprise Me
-import { EditPlan, Layer, VideoLayer, CaptionLayer } from '@/engine/types';
+import { EditPlan, Layer, CaptionLayer } from '@/engine/types';
 import { Registry } from '@/registry';
-import { GoogleGenAI } from '@google/genai';
 import { ApiKeysService } from '@/storage/keys';
 import { detectAudioBpm } from './bpm-detector';
 import { LibraryDB } from '@/storage/library-db';
+import { callGeminiJson } from '@/ai/gemini';
+import { resolveTextModel } from '@/ai/models';
 
 export interface HookVariant {
   id: string;
@@ -110,7 +111,6 @@ export class MagicFeaturesService {
       ];
     }
 
-    const ai = new GoogleGenAI({ apiKey: keys.gemini });
     const prompt = `Based on this video script, write 5 punchy 3-second opening hook variants designed for 9:16 vertical Shorts:
 "${scriptText.slice(0, 500)}"
 
@@ -127,12 +127,11 @@ Return a JSON array of 5 objects:
 ]`;
 
     try {
-      const res = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+      const model = await resolveTextModel();
+      const parsed = await callGeminiJson<HookVariant[]>({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { responseMimeType: 'application/json' },
-      });
-      const parsed = JSON.parse(res.text || '[]');
+      }, undefined, { model, kind: 'text' });
+
       if (Array.isArray(parsed) && parsed.length >= 3) {
         return parsed;
       }
@@ -222,7 +221,6 @@ Return a JSON array of 5 objects:
       throw new Error('Gemini API key is required to use Style Steal.');
     }
 
-    const ai = new GoogleGenAI({ apiKey: keys.gemini });
     const catalog = Registry.getCatalogSummary();
 
     const prompt = `You are Reelix Style Steal AI.
@@ -246,17 +244,15 @@ Create a reusable Reelix Template JSON with:
   }
 }`;
 
-    const res = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+    const model = await resolveTextModel();
+    const parsed = await callGeminiJson<any>({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { responseMimeType: 'application/json' },
-    });
+    }, undefined, { model, kind: 'text' });
 
-    const parsed = JSON.parse(res.text || '{}');
     // Save directly into Library DB
     await LibraryDB.saveItem({
-      id: parsed.id,
-      name: parsed.name,
+      id: parsed.id || `template-${Date.now()}`,
+      name: parsed.name || templateName || 'Custom Template',
       category: 'templates',
       tags: parsed.tags || ['style-steal'],
       isBuiltIn: false,

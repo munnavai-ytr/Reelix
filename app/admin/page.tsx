@@ -1,7 +1,7 @@
 // Protected Admin Route (Requires PIN if set)
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PinService } from '@/storage/pin';
 import { Lock, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -9,10 +9,18 @@ import { triggerHaptic } from '@/storage/haptics';
 import { AdminConsole } from '@/ui/components/AdminConsole';
 
 export default function AdminPage() {
-  const [isPinRequired] = useState(() => PinService.isPinSet());
-  const [isUnlocked, setIsUnlocked] = useState(() => !PinService.isPinSet());
+  const [mounted, setMounted] = useState(false);
+  const [isPinRequired, setIsPinRequired] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(true);
   const [pinInput, setPinInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    setMounted(true);
+    const pinSet = PinService.isPinSet();
+    setIsPinRequired(pinSet);
+    setIsUnlocked(!pinSet);
+  }, []);
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +36,14 @@ export default function AdminPage() {
       setPinInput('');
     }
   };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-[#0B0B0F] text-slate-100 p-4 sm:p-8 flex flex-col items-center justify-center">
+        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B0B0F] text-slate-100 p-4 sm:p-8 flex flex-col items-center justify-center">

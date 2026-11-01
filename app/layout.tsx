@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Noto_Sans_Bengali } from 'next/font/google';
 import './globals.css';
 
@@ -29,6 +29,15 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#0B0B0F',
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -36,10 +45,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-        <meta name="theme-color" content="#0B0B0F" />
-      </head>
       <body className={`${inter.variable} ${notoSansBengali.variable} font-sans antialiased bg-[#0B0B0F] text-slate-100 min-h-screen selection:bg-violet-500/30 selection:text-white`} suppressHydrationWarning>
         {children}
       </body>

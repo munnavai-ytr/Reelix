@@ -4,14 +4,22 @@
 import React, { useState, useEffect } from 'react';
 import { ApiKeysService, ApiKeys } from '../../storage/keys';
 import { PinService } from '../../storage/pin';
-import { Key, Shield, CheckCircle2, AlertCircle, Sparkles, Lock, Unlock, Eye, EyeOff } from 'lucide-react';
+import { SystemPromptsService, PromptConfig } from '../../storage/system-prompts';
+import { getFilteredModelLists, invalidateModelCache, FormattedModelOption } from '../../ai/models';
+import { Key, Shield, CheckCircle2, AlertCircle, Sparkles, Lock, Unlock, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { triggerHaptic } from '../../storage/haptics';
 
 export function SettingsModal() {
   const [keys, setKeys] = useState<ApiKeys>(() => ApiKeysService.getKeys());
+  const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
 
   const [testStatus, setTestStatus] = useState<Record<string, { loading: boolean; success?: boolean; message?: string }>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
+
+  // Dynamic model lists
+  const [textModelOptions, setTextModelOptions] = useState<FormattedModelOption[]>([]);
+  const [ttsModelOptions, setTtsModelOptions] = useState<FormattedModelOption[]>([]);
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
 
   // PIN state
   const [pinEnabled, setPinEnabled] = useState(() => PinService.isPinSet());
@@ -19,10 +27,38 @@ export function SettingsModal() {
   const [newPin, setNewPin] = useState('');
   const [pinMessage, setPinMessage] = useState('');
 
+  const loadModels = async (force = false) => {
+    setIsRefreshingModels(true);
+    try {
+      if (force) invalidateModelCache();
+      const { textModels, ttsModels } = await getFilteredModelLists(force);
+      setTextModelOptions(textModels);
+      setTtsModelOptions(ttsModels);
+    } catch (err) {
+      console.warn('Failed to load dynamic model list:', err);
+    } finally {
+      setIsRefreshingModels(false);
+    }
+  };
+
+  useEffect(() => {
+    if (keys.gemini && keys.gemini.trim().length > 10) {
+      loadModels();
+    }
+  }, []);
+
   const handleSave = () => {
     triggerHaptic('success');
     ApiKeysService.saveKeys(keys);
+    SystemPromptsService.saveConfig(promptConfig);
     alert('Settings saved successfully!');
+  };
+
+  const handleModelChange = (key: 'selectedModel' | 'selectedTtsModel', val: string) => {
+    triggerHaptic('light');
+    const updated = { ...promptConfig, [key]: val };
+    setPromptConfig(updated);
+    SystemPromptsService.saveConfig({ [key]: val });
   };
 
   const runTest = async (type: 'gemini' | 'pexels' | 'freesound' | 'jamendo') => {
@@ -32,6 +68,9 @@ export function SettingsModal() {
     let res: { success: boolean; message: string };
     if (type === 'gemini') {
       res = await ApiKeysService.testGemini(keys.gemini);
+      if (res.success) {
+        await loadModels(true);
+      }
     } else if (type === 'pexels') {
       res = await ApiKeysService.testPexels(keys.pexels);
     } else if (type === 'freesound') {
@@ -87,8 +126,8 @@ export function SettingsModal() {
 
       {/* API Keys Configuration */}
       <div className="space-y-5">
-        {/* Gemini API Key */}
-        <div className="p-4 sm:p-5 rounded-3xl glass-card border border-white/5 space-y-3">
+        {/* Gemini API Key & Model Selectors */}
+        <div className="p-4 sm:p-5 rounded-3xl glass-card border border-white/5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -131,10 +170,63 @@ export function SettingsModal() {
             <div className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
               testStatus.gemini.success ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
             }`}>
-              {testStatus.gemini.success ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+              {testStatus.gemini.success ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
               <span>{testStatus.gemini.message}</span>
             </div>
           )}
+
+          {/* Model Selection Dropdowns */}
+          <div className="pt-3 border-t border-white/5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <span>AI Model Selection</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => loadModels(true)}
+                disabled={isRefreshingModels || !keys.gemini.trim()}
+                className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 disabled:opacity-30"
+              >
+                <RefreshCw className={`w-3 h-3 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                <span>Refresh models</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-slate-300 mb-1 block">Text Model</label>
+                <select
+                  value={promptConfig.selectedModel || 'auto'}
+                  onChange={e => handleModelChange('selectedModel', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+                >
+                  <option value="auto">Auto (recommended)</option>
+                  {textModelOptions.map(m => (
+                    <option key={m.name} value={m.name}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-300 mb-1 block">Voice (TTS) Model</label>
+                <select
+                  value={promptConfig.selectedTtsModel || 'auto'}
+                  onChange={e => handleModelChange('selectedTtsModel', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+                >
+                  <option value="auto">Auto (recommended)</option>
+                  {ttsModelOptions.map(m => (
+                    <option key={m.name} value={m.name}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-normal">
+              Free tier: use a Flash or Flash-Lite model. Pro models may be paid-only. Auto picks the best working Flash model.
+            </p>
+          </div>
         </div>
 
         {/* Pexels API Key */}
@@ -176,7 +268,7 @@ export function SettingsModal() {
             <div className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
               testStatus.pexels.success ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
             }`}>
-              {testStatus.pexels.success ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+              {testStatus.pexels.success ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
               <span>{testStatus.pexels.message}</span>
             </div>
           )}
@@ -248,7 +340,7 @@ export function SettingsModal() {
         onClick={handleSave}
         className="w-full py-3.5 rounded-2xl brand-gradient text-white font-bold text-sm shadow-xl shadow-violet-500/20 active:scale-95 transition-all"
       >
-        Save All Keys Locally
+        Save All Keys & Model Choices
       </button>
 
       {/* Admin Route PIN Lock Protection Section */}

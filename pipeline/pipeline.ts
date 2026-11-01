@@ -1,4 +1,4 @@
-// 7-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator
+// 7-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator with detailed error visibility
 import { PipelineProgressEvent } from './types';
 import { ingestMediaInputs } from './ingest';
 import { transcribeAudio } from '../ai/whisper';
@@ -31,7 +31,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
 }> {
   const { onProgress } = opts;
 
-  // STEP 1: INGEST
+  // STEP 1: INGEST & OPFS
   onProgress({
     step: 'ingest',
     stepIndex: 1,
@@ -41,30 +41,41 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Reading audio, media durations, and caching to Origin Private File System...',
   });
 
-  const ingested = await ingestMediaInputs({
-    audioFile: opts.audioFile,
-    script: opts.scriptText,
-    videoFiles: opts.videoFiles,
-    imageFiles: opts.imageFiles,
-  });
+  let ingested;
+  let finalVoiceUrl: string | undefined;
+  let finalDuration: number;
+  let voiceBlob: Blob | undefined;
 
-  let finalVoiceUrl = ingested.audioUrl;
-  let finalDuration = ingested.audioDuration;
-  let voiceBlob = ingested.audioBlob;
-
-  if (!finalVoiceUrl && opts.scriptText) {
-    onProgress({
-      step: 'ingest',
-      stepIndex: 1,
-      totalSteps: 6,
-      percentage: 20,
-      title: 'Generating AI Voiceover',
-      detail: `Synthesizing script with voice persona "${opts.voiceName || 'Puck'}"...`,
+  try {
+    ingested = await ingestMediaInputs({
+      audioFile: opts.audioFile,
+      script: opts.scriptText,
+      videoFiles: opts.videoFiles,
+      imageFiles: opts.imageFiles,
     });
-    const ttsRes = await generateGeminiTtsAudio(opts.scriptText, opts.voiceName || 'Puck');
-    finalVoiceUrl = ttsRes.audioUrl;
-    voiceBlob = ttsRes.audioBlob;
-    finalDuration = ttsRes.durationSec;
+
+    finalVoiceUrl = ingested.audioUrl;
+    finalDuration = ingested.audioDuration;
+    voiceBlob = ingested.audioBlob;
+
+    if (!finalVoiceUrl && opts.scriptText) {
+      onProgress({
+        step: 'ingest',
+        stepIndex: 1,
+        totalSteps: 6,
+        percentage: 20,
+        title: 'Generating AI Voiceover',
+        detail: `Synthesizing script with voice persona "${opts.voiceName || 'Puck'}"...`,
+      });
+      const ttsRes = await generateGeminiTtsAudio(opts.scriptText, opts.voiceName || 'Puck');
+      finalVoiceUrl = ttsRes.audioUrl;
+      voiceBlob = ttsRes.audioBlob;
+      finalDuration = ttsRes.durationSec;
+    }
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 1 – Ingest:', err);
+    throw new Error(`Step 1 – Ingest: ${msg}`);
   }
 
   // STEP 2: TRANSCRIBE
@@ -77,11 +88,18 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Generating micro-timed word timestamps for animated viral captions...',
   });
 
-  const transcription = await transcribeAudio(
-    voiceBlob || new Blob([]),
-    finalDuration,
-    opts.scriptText
-  );
+  let transcription;
+  try {
+    transcription = await transcribeAudio(
+      voiceBlob || new Blob([]),
+      finalDuration,
+      opts.scriptText
+    );
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 2 – Transcribe:', err);
+    throw new Error(`Step 2 – Transcribe: ${msg}`);
+  }
 
   // STEP 3: ANALYZE
   onProgress({
@@ -93,7 +111,13 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Detecting visual hooks, facial focus coordinates, and pacing rhythm...',
   });
 
-  await new Promise(r => setTimeout(r, 300));
+  try {
+    await new Promise(r => setTimeout(r, 200));
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 3 – Analyze:', err);
+    throw new Error(`Step 3 – Analyze: ${msg}`);
+  }
 
   // STEP 4: DIRECTOR
   onProgress({
@@ -105,26 +129,33 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Constructing 2s hook, scene cuts, zoom punches, and auto-ducking rules...',
   });
 
-  const keys = ApiKeysService.getKeys();
-  const directorResult = await generateDirectorPlan(
-    {
-      script: opts.scriptText || transcription.text,
-      voiceUrl: finalVoiceUrl,
-      voiceDuration: finalDuration,
-      userVideoUrls: ingested.videoUrls,
-      userImageUrls: ingested.imageUrls,
-      niche: opts.niche,
-      style: opts.style,
-      targetDuration: opts.targetDuration || finalDuration,
-      captionStyle: opts.captionStyle,
-      userPrompt: opts.userPrompt,
-      language: opts.language,
-      hasPexelsKey: !!(keys.pexels && keys.pexels.length > 5),
-    },
-    transcription.words
-  );
-
-  const plan = directorResult.editPlan;
+  let directorResult;
+  let plan: EditPlan;
+  try {
+    const keys = ApiKeysService.getKeys();
+    directorResult = await generateDirectorPlan(
+      {
+        script: opts.scriptText || transcription.text,
+        voiceUrl: finalVoiceUrl,
+        voiceDuration: finalDuration,
+        userVideoUrls: ingested.videoUrls,
+        userImageUrls: ingested.imageUrls,
+        niche: opts.niche,
+        style: opts.style,
+        targetDuration: opts.targetDuration || finalDuration,
+        captionStyle: opts.captionStyle,
+        userPrompt: opts.userPrompt,
+        language: opts.language,
+        hasPexelsKey: !!(keys.pexels && keys.pexels.length > 5),
+      },
+      transcription.words
+    );
+    plan = directorResult.editPlan;
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 4 – Director:', err);
+    throw new Error(`Step 4 – Director: ${msg}`);
+  }
 
   // STEP 5: RESOLVE ASSETS
   onProgress({
@@ -136,23 +167,29 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Fetching portrait stock footage, synthesizing SFX, and composing soundtrack...',
   });
 
-  const stockVideos = await resolveStockVideos(directorResult.bRollQueries);
-  let stockIdx = 0;
-  for (const layer of plan.layers) {
-    if (layer.type === 'video' && !layer.src) {
-      if (stockVideos[stockIdx]) {
-        (layer as VideoLayer).src = stockVideos[stockIdx];
-        stockIdx++;
-      } else if (ingested.videoUrls.length > 0) {
-        (layer as VideoLayer).src = ingested.videoUrls[stockIdx % ingested.videoUrls.length];
+  try {
+    const stockVideos = await resolveStockVideos(directorResult.bRollQueries);
+    let stockIdx = 0;
+    for (const layer of plan.layers) {
+      if (layer.type === 'video' && !layer.src) {
+        if (stockVideos[stockIdx]) {
+          (layer as VideoLayer).src = stockVideos[stockIdx];
+          stockIdx++;
+        } else if (ingested.videoUrls.length > 0) {
+          (layer as VideoLayer).src = ingested.videoUrls[stockIdx % ingested.videoUrls.length];
+        }
       }
     }
-  }
 
-  const bgMusicUrl = await resolveBackgroundMusic(opts.style === 'Hype Beast / High Energy' ? 'hype' : 'upbeat', plan.duration);
-  const musicLayer = plan.layers.find(l => l.type === 'audio' && (l as AudioLayer).audioType === 'music') as AudioLayer | undefined;
-  if (musicLayer) {
-    musicLayer.src = bgMusicUrl;
+    const bgMusicUrl = await resolveBackgroundMusic(opts.style === 'Hype Beast / High Energy' ? 'hype' : 'upbeat', plan.duration);
+    const musicLayer = plan.layers.find(l => l.type === 'audio' && (l as AudioLayer).audioType === 'music') as AudioLayer | undefined;
+    if (musicLayer) {
+      musicLayer.src = bgMusicUrl;
+    }
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 5 – Assets:', err);
+    throw new Error(`Step 5 – Assets: ${msg}`);
   }
 
   // STEP 6: PREPARE PREVIEW
@@ -170,31 +207,37 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     images: new Map(),
   };
 
-  for (const layer of plan.layers) {
-    if (layer.type === 'video' && layer.src && !assetCache.videos.has(layer.src)) {
-      const v = document.createElement('video');
-      v.src = layer.src;
-      v.crossOrigin = 'anonymous';
-      v.muted = true;
-      v.playsInline = true;
-      v.preload = 'auto';
-      assetCache.videos.set(layer.src, v);
-    } else if (layer.type === 'image' && layer.src && !assetCache.images.has(layer.src)) {
-      const img = new Image();
-      img.src = layer.src;
-      img.crossOrigin = 'anonymous';
-      assetCache.images.set(layer.src, img);
+  try {
+    for (const layer of plan.layers) {
+      if (layer.type === 'video' && layer.src && !assetCache.videos.has(layer.src)) {
+        const v = document.createElement('video');
+        v.src = layer.src;
+        v.crossOrigin = 'anonymous';
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = 'auto';
+        assetCache.videos.set(layer.src, v);
+      } else if (layer.type === 'image' && layer.src && !assetCache.images.has(layer.src)) {
+        const img = new Image();
+        img.src = layer.src;
+        img.crossOrigin = 'anonymous';
+        assetCache.images.set(layer.src, img);
+      }
     }
-  }
 
-  await ProjectDb.saveProject({
-    id: plan.id,
-    title: plan.title,
-    duration: plan.duration,
-    updatedAt: Date.now(),
-    createdAt: Date.now(),
-    editPlan: plan,
-  });
+    await ProjectDb.saveProject({
+      id: plan.id,
+      title: plan.title,
+      duration: plan.duration,
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+      editPlan: plan,
+    });
+  } catch (err: unknown) {
+    const msg = (err as Error).message || String(err);
+    console.error('[Pipeline Error] Step 6 – Preview:', err);
+    throw new Error(`Step 6 – Preview: ${msg}`);
+  }
 
   onProgress({
     step: 'preview',

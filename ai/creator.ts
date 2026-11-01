@@ -1,15 +1,10 @@
 // Reelix AI Creator Studio Service
 // Generates validated declarative effects, transitions, text animations, caption styles, SVG stickers & templates
-import { GoogleGenAI } from '@google/genai';
 import { ApiKeysService } from '@/storage/keys';
 import { SystemPromptsService } from '@/storage/system-prompts';
 import { ShaderEngine } from '@/registry/shader-engine';
-import { EffectDefinition } from '@/registry/effects';
-import { TransitionDefinition } from '@/registry/transitions';
-import { TextAnimationDefinition } from '@/registry/text-animations';
-import { CaptionStyleDefinition } from '@/registry/caption-styles';
-import { TemplateDefinition } from '@/registry/templates';
-import { StickerDefinition } from '@/registry/stickers';
+import { callGeminiJson } from './gemini';
+import { resolveTextModel } from './models';
 
 export type CreatorItemType =
   | 'effect'
@@ -39,7 +34,7 @@ export class AiCreatorService {
 
     const config = SystemPromptsService.getConfig();
     const startTime = Date.now();
-    const ai = new GoogleGenAI({ apiKey: keys.gemini });
+    const model = await resolveTextModel();
 
     const systemInstruction = `${config.creatorPrompt}
 You are creating a declarative video asset of type: "${type}".
@@ -63,24 +58,21 @@ Specific contracts for type:
 - If "template": { "id": string, "name": string, "niche": string, "description": string, "tags": string[], "aspectRatio": "9:16", "recommendedDuration": number, "plan": { "tracks": [...] } }
 `;
 
-    const userPrompt = existingContext
+    const userPromptText = existingContext
       ? `Update the existing asset based on this instruction: "${prompt}"\nCurrent asset:\n${JSON.stringify(existingContext, null, 2)}`
       : `Create a new "${type}" asset matching this description: "${prompt}"`;
 
-    try {
-      const response = await ai.models.generateContent({
-        model: config.selectedModel || 'gemini-2.5-flash',
-        contents: [
-          { role: 'user', parts: [{ text: `${systemInstruction}\n\nTask:\n${userPrompt}\n\nReturn ONLY raw JSON.` }] },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.7,
-        },
-      });
+    const payload = {
+      contents: [
+        { role: 'user', parts: [{ text: `${systemInstruction}\n\nTask:\n${userPromptText}\n\nReturn ONLY raw JSON.` }] },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+      },
+    };
 
-      const text = response.text || '{}';
-      const parsed = JSON.parse(text);
+    try {
+      const parsed = await callGeminiJson<any>(payload, undefined, { model, kind: 'text' });
 
       let shaderValid: boolean | undefined = undefined;
       let shaderError: string | undefined = undefined;
@@ -102,7 +94,7 @@ Specific contracts for type:
 
       SystemPromptsService.logCall({
         service: 'ai-creator',
-        model: config.selectedModel || 'gemini-2.5-flash',
+        model,
         durationMs: Date.now() - startTime,
         status: 'success',
         summary: `Created ${type}: ${parsed.name || parsed.id}`,
@@ -117,7 +109,7 @@ Specific contracts for type:
     } catch (err: any) {
       SystemPromptsService.logCall({
         service: 'ai-creator',
-        model: config.selectedModel || 'gemini-2.5-flash',
+        model,
         durationMs: Date.now() - startTime,
         status: 'error',
         summary: `Failed to create ${type}`,
