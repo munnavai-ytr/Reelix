@@ -41,18 +41,18 @@ export function PipelineOverlay() {
 
   // Elapsed timer
   useEffect(() => {
-    if (pipelineProgress && !pipelineProgress.error) {
-      setElapsedSec(0);
-      timerRef.current = setInterval(() => {
-        setElapsedSec((prev) => prev + 1);
-      }, 1000);
-    } else {
+    if (!pipelineProgress || pipelineProgress.error) {
       if (timerRef.current) clearInterval(timerRef.current);
+      return;
     }
+    const interval = setInterval(() => {
+      setElapsedSec((prev) => prev + 1);
+    }, 1000);
+    timerRef.current = interval;
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      clearInterval(interval);
     };
-  }, [pipelineProgress?.error, !!pipelineProgress]);
+  }, [pipelineProgress?.error, pipelineProgress?.stepIndex]);
 
   if (!pipelineProgress) return null;
 

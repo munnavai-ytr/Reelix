@@ -1,11 +1,11 @@
-// WebCodecs 1080x1920 MP4 Export Modal with Presets, Watermark & Real-Time Cancel
+// WebCodecs 1080x1920 / 720x1280 MP4 Export Modal with Mobile Presets & Estimated Remaining Time
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useStudioStore } from '@/engine/store';
 import { exportVideoMp4, downloadOrShareVideo, ExportProgress } from '@/pipeline/exporter';
-import { Download, Share2, Sparkles, X, CheckCircle2, Film, Shield } from 'lucide-react';
+import { Download, Share2, Sparkles, X, CheckCircle2, Film, Shield, Zap } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { triggerHaptic } from '@/storage/haptics';
 import { BrandKitService } from '@/storage/brand-kit';
@@ -26,12 +26,19 @@ export function ExportModal() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [resolutionPreset, setResolutionPreset] = useState<'1080x1920' | '720x1280'>('1080x1920');
-  const [fpsPreset, setFpsPreset] = useState<30 | 60>(30);
-  const [qualityPreset, setQualityPreset] = useState<'high' | 'medium' | 'draft'>('high');
-  const [includeWatermark, setIncludeWatermark] = useState(() => BrandKitService.getSettings().watermarkEnabled);
 
-  const abortControllerRef = useRef<boolean>(false);
+  const [isLowMemoryOrMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const isNative = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+    const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
+    return (devMem !== undefined && devMem <= 4) || !!isNative;
+  });
+  const [resolutionPreset, setResolutionPreset] = useState<'1080x1920' | '720x1280'>(() => {
+    if (typeof window === 'undefined') return '1080x1920';
+    const isNative = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+    const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
+    return ((devMem !== undefined && devMem <= 4) || !!isNative) ? '720x1280' : '1080x1920';
+  });
 
   if (!isExporting || !currentPlan) return null;
 
@@ -58,6 +65,7 @@ export function ExportModal() {
           text: brand.watermarkText || 'Reelix',
           fontSize: 28,
           fontFamily: brand.defaultFontFamily || 'Inter, sans-serif',
+          fontWeight: '900',
           color: 'rgba(255, 255, 255, 0.75)',
           transform: {
             x: 360,
@@ -149,12 +157,20 @@ export function ExportModal() {
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setIsExporting(false)}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {isLowMemoryOrMobile && (
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-[11px] text-cyan-300 flex items-center gap-2">
+            <Zap className="w-4 h-4 shrink-0 text-cyan-400" />
+            <span>720p is selected for faster mobile export (1080p is available below).</span>
+          </div>
+        )}
 
         {!isProcessing && !exportedBlob && (
           <div className="space-y-3">
@@ -172,6 +188,7 @@ export function ExportModal() {
                   return (
                     <button
                       key={idx}
+                      type="button"
                       onClick={() => {
                         setResolutionPreset(p.res as any);
                         setFpsPreset(p.fps as any);
@@ -198,9 +215,10 @@ export function ExportModal() {
                   { id: 'high', label: 'High (12 Mbps)' },
                   { id: 'medium', label: 'Mid (8 Mbps)' },
                   { id: 'draft', label: 'Draft (4 Mbps)' },
-                ].map(q => (
+                ].map((q) => (
                   <button
                     key={q.id}
+                    type="button"
                     onClick={() => setQualityPreset(q.id as any)}
                     className={`p-2 rounded-xl text-[11px] font-semibold border transition-all ${
                       qualityPreset === q.id
@@ -222,7 +240,7 @@ export function ExportModal() {
               <input
                 type="checkbox"
                 checked={includeWatermark}
-                onChange={e => setIncludeWatermark(e.target.checked)}
+                onChange={(e) => setIncludeWatermark(e.target.checked)}
                 className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
               />
             </div>
@@ -266,9 +284,15 @@ export function ExportModal() {
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400">
               <span className="capitalize">{exportProgress.phase.replace('_', ' ')}...</span>
+              {exportProgress.estimatedSecRemaining !== undefined && (
+                <span className="font-mono text-cyan-400 font-semibold">
+                  ~{exportProgress.estimatedSecRemaining}s left
+                </span>
+              )}
               <button
+                type="button"
                 onClick={handleCancelExport}
-                className="text-rose-400 hover:text-rose-300 font-semibold underline"
+                className="text-rose-400 hover:text-rose-300 font-semibold underline ml-auto"
               >
                 Cancel
               </button>
@@ -299,6 +323,7 @@ export function ExportModal() {
         <div className="space-y-2 pt-1">
           {!exportedBlob ? (
             <button
+              type="button"
               onClick={handleStartExport}
               disabled={isProcessing}
               className="w-full py-3.5 rounded-2xl brand-gradient text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xl shadow-violet-500/25 active:scale-95 disabled:opacity-50 transition-all"
@@ -318,6 +343,7 @@ export function ExportModal() {
           ) : (
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={handleDownload}
                 className="flex-1 py-3.5 rounded-2xl brand-gradient text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xl shadow-violet-500/25 active:scale-95 transition-all"
               >
@@ -325,6 +351,7 @@ export function ExportModal() {
                 <span>Save / Download MP4</span>
               </button>
               <button
+                type="button"
                 onClick={handleDownload}
                 title="Share via Native OS"
                 className="px-4 py-3.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center"

@@ -16,7 +16,10 @@ import {
   Activity,
   Save,
   Lock,
+  Copy,
+  HeartPulse,
 } from 'lucide-react';
+import { Logger, LogItem } from '@/storage/logger';
 import { LibraryDB, LibraryItem } from '@/storage/library-db';
 import { ApiKeysService, ApiKeys } from '@/storage/keys';
 import { SystemPromptsService, PromptConfig, LogEntry } from '@/storage/system-prompts';
@@ -34,8 +37,42 @@ interface AdminConsoleProps {
 
 export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   const [activeTab, setActiveTab] = useState<
-    'library' | 'prompts' | 'brand' | 'keys' | 'storage' | 'logs' | 'hardware'
+    'library' | 'prompts' | 'brand' | 'keys' | 'storage' | 'logs' | 'hardware' | 'health'
   >('library');
+
+  const [healthInfo, setHealthInfo] = useState<{
+    loadedVideos: number;
+    loadedAudios: number;
+    memoryUsage: string;
+  }>({
+    loadedVideos: 0,
+    loadedAudios: 0,
+    memoryUsage: 'N/A',
+  });
+  const [errorLogs, setErrorLogs] = useState<LogItem[]>(() => Logger.getLogs());
+
+  useEffect(() => {
+    const updateHealth = () => {
+      if (typeof window === 'undefined') return;
+      const vids = document.querySelectorAll('video').length;
+      const auds = document.querySelectorAll('audio').length;
+      const mem = (performance as any).memory;
+      const memStr = mem
+        ? `${Math.round(mem.usedJSHeapSize / 1048576)} MB / ${Math.round(mem.jsHeapSizeLimit / 1048576)} MB`
+        : 'N/A (Standard browser API)';
+
+      setHealthInfo({
+        loadedVideos: vids,
+        loadedAudios: auds,
+        memoryUsage: memStr,
+      });
+      setErrorLogs(Logger.getLogs());
+    };
+
+    updateHealth();
+    const interval = setInterval(updateHealth, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Library Items state
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
@@ -304,7 +341,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           { id: 'brand', label: 'Brand & Watermark', icon: <Sparkles className="w-3.5 h-3.5" /> },
           { id: 'hardware', label: 'Hardware Prober', icon: <Cpu className="w-3.5 h-3.5" /> },
           { id: 'storage', label: 'Storage & Backup', icon: <HardDrive className="w-3.5 h-3.5" /> },
-          { id: 'logs', label: 'AI Call Logs', icon: <Activity className="w-3.5 h-3.5" /> },
+          { id: 'health', label: 'Project Health', icon: <HeartPulse className="w-3.5 h-3.5 text-rose-400" /> },
+          { id: 'logs', label: 'AI & Error Logs', icon: <Activity className="w-3.5 h-3.5" /> },
         ].map(tab => (
           <button
             key={tab.id}
@@ -716,60 +754,153 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
           </div>
         )}
 
-        {activeTab === 'logs' && (
+        {activeTab === 'health' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-white">AI Telemetry & Error Viewer</h3>
-                <p className="text-xs text-white/50">Last 50 API calls with duration and status</p>
-              </div>
-
-              <button
-                onClick={handleClearLogs}
-                className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/60 hover:text-white transition-colors"
-              >
-                Clear Logs
-              </button>
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <HeartPulse className="w-4 h-4 text-rose-400" />
+                <span>Project Health & Resource Monitor</span>
+              </h3>
+              <p className="text-xs text-white/50 mt-1">
+                Real-time count of active video elements, audio elements, and JS heap memory.
+              </p>
             </div>
 
-            {logs.length === 0 ? (
-              <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl">
-                <Activity className="w-8 h-8 text-white/20 mx-auto mb-2" />
-                <p className="text-xs text-white/50">No AI telemetry calls recorded yet.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-4 rounded-2xl bg-[#191927] border border-[#26263A] space-y-1">
+                <span className="text-[11px] font-mono text-[#8D8DA8]">Active Loaded Video Elements</span>
+                <p className="text-2xl font-bold font-mono text-cyan-400">{healthInfo.loadedVideos}</p>
+                <span className="text-[10px] text-[#8D8DA8]">Pool limit: max 3 active decoded videos</span>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {logs.map(log => (
-                  <div
-                    key={log.id}
-                    className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-between text-xs"
+
+              <div className="p-4 rounded-2xl bg-[#191927] border border-[#26263A] space-y-1">
+                <span className="text-[11px] font-mono text-[#8D8DA8]">Loaded Audio Elements</span>
+                <p className="text-2xl font-bold font-mono text-violet-400">{healthInfo.loadedAudios}</p>
+                <span className="text-[10px] text-[#8D8DA8]">Managed via Web Audio API Graph</span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#191927] border border-[#26263A] space-y-1">
+                <span className="text-[11px] font-mono text-[#8D8DA8]">JS Heap Memory</span>
+                <p className="text-sm font-bold font-mono text-emerald-400 truncate">{healthInfo.memoryUsage}</p>
+                <span className="text-[10px] text-[#8D8DA8]">Garbage collector managed</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'logs' && (
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white">Application Error Logger (Last 200)</h3>
+                  <p className="text-xs text-white/50">Centralized client & pipeline exception logs</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(errorLogs, null, 2));
+                      toast.success('Copied all error logs to clipboard!');
+                    }}
+                    disabled={errorLogs.length === 0}
+                    className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-semibold text-white flex items-center gap-1.5 disabled:opacity-40"
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            log.status === 'success' ? 'bg-emerald-400' : 'bg-rose-400'
-                          }`}
-                        />
-                        <span className="font-bold text-white capitalize">{log.service}</span>
-                        <span className="font-mono text-[10px] text-cyan-400">{log.model}</span>
-                        <span className="font-mono text-[10px] text-white/40">
-                          {log.durationMs}ms
-                        </span>
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy All Logs
+                  </button>
+                  <button
+                    onClick={() => {
+                      Logger.clearLogs();
+                      setErrorLogs([]);
+                      toast.info('Error logs cleared');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/60 hover:text-white transition-colors"
+                  >
+                    Clear Error Logs
+                  </button>
+                </div>
+              </div>
+
+              {errorLogs.length === 0 ? (
+                <div className="p-6 text-center border border-dashed border-white/10 rounded-2xl text-xs text-white/40">
+                  No error logs recorded. App is running cleanly.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {errorLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between font-mono text-[10px] text-rose-300">
+                        <span className="font-bold">{log.stepName}</span>
+                        <span>{new Date(log.time).toLocaleTimeString()}</span>
                       </div>
-                      <p className="text-[11px] text-white/70 mt-1">{log.summary}</p>
-                      {log.error && (
-                        <p className="text-[10px] font-mono text-rose-400 mt-0.5">{log.error}</p>
+                      <p className="font-mono text-white text-[11px] leading-relaxed">{log.message}</p>
+                      {log.details && (
+                        <p className="font-mono text-[10px] text-rose-300/80 truncate">{log.details}</p>
                       )}
                     </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                    <span className="text-[10px] text-white/30 whitespace-nowrap">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                ))}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white">AI Telemetry Call History</h3>
+                  <p className="text-xs text-white/50">Last 50 API calls with duration and status</p>
+                </div>
+
+                <button
+                  onClick={handleClearLogs}
+                  className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/60 hover:text-white transition-colors"
+                >
+                  Clear AI Logs
+                </button>
               </div>
-            )}
+
+              {logs.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-white/10 rounded-2xl">
+                  <Activity className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                  <p className="text-xs text-white/50">No AI telemetry calls recorded yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {logs.map(log => (
+                    <div
+                      key={log.id}
+                      className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              log.status === 'success' ? 'bg-emerald-400' : 'bg-rose-400'
+                            }`}
+                          />
+                          <span className="font-bold text-white capitalize">{log.service}</span>
+                          <span className="font-mono text-[10px] text-cyan-400">{log.model}</span>
+                          <span className="font-mono text-[10px] text-white/40">
+                            {log.durationMs}ms
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-white/70 mt-1">{log.summary}</p>
+                        {log.error && (
+                          <p className="text-[10px] font-mono text-rose-400 mt-0.5">{log.error}</p>
+                        )}
+                      </div>
+
+                      <span className="text-[10px] text-white/30 whitespace-nowrap">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

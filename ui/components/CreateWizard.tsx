@@ -14,7 +14,6 @@ import {
   Image as ImageIcon,
   Check,
   ChevronDown,
-  Layers,
   Music,
   Scissors,
   Plus,
@@ -24,6 +23,7 @@ import {
 import { triggerHaptic } from '@/storage/haptics';
 import confetti from 'canvas-confetti';
 import { GamificationService } from '@/storage/gamification';
+import { MediaCacheDb } from '@/storage/db';
 import { toast } from './Toast';
 import { STRINGS } from '@/ui/strings';
 import { BRAND } from '@/ui/brand';
@@ -87,18 +87,48 @@ export function CreateWizard() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Decode and draw audio waveform on canvas
-  const drawWaveformFromBlob = useCallback(async (blob: Blob | File) => {
+  // Decode and draw audio waveform with IndexedDB caching
+  const drawWaveformFromBlob = useCallback(async (blob: Blob | File, fileName: string) => {
     try {
-      const arrayBuffer = await blob.arrayBuffer();
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const actx = new AudioCtx();
-      const decodedBuffer = await actx.decodeAudioData(arrayBuffer.slice(0));
-      actx.close().catch(() => {});
+      const fileKey = `${fileName}_${blob.size}_${(blob as File).lastModified || 0}_waveform`;
+      const cachedData = await MediaCacheDb.get<{ peaks: number[]; duration: number }>(fileKey);
 
-      const duration = decodedBuffer.duration;
+      let peaks: number[] = [];
+      let duration = 0;
+
+      if (cachedData) {
+        peaks = cachedData.peaks;
+        duration = cachedData.duration;
+      } else {
+        const arrayBuffer = await blob.arrayBuffer();
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const actx = new AudioCtx();
+        const decodedBuffer = await actx.decodeAudioData(arrayBuffer.slice(0));
+        actx.close().catch(() => {});
+
+        duration = decodedBuffer.duration;
+        const rawData = decodedBuffer.getChannelData(0);
+        const barsCount = 48; // Max 600 bars constraint (using 48 for UI)
+        const step = Math.floor(rawData.length / barsCount);
+
+        let maxAmp = 0.01;
+        for (let i = 0; i < barsCount; i++) {
+          let sum = 0;
+          for (let j = 0; j < step; j++) {
+            sum += Math.abs(rawData[i * step + j] || 0);
+          }
+          const avg = sum / step;
+          peaks.push(avg);
+          if (avg > maxAmp) maxAmp = avg;
+        }
+
+        // Normalize
+        peaks = peaks.map((p) => Math.min(1, p / maxAmp));
+        await MediaCacheDb.set(fileKey, 'waveform', { peaks, duration });
+      }
+
       setAudioDurationSec(duration);
 
       const canvas = waveformCanvasRef.current;
@@ -110,35 +140,17 @@ export function CreateWizard() {
       const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
 
-      const rawData = decodedBuffer.getChannelData(0);
-      const barsCount = 48;
-      const step = Math.floor(rawData.length / barsCount);
+      const barWidth = Math.max(2, Math.floor(width / peaks.length) - 2);
 
-      const barWidth = Math.max(2, Math.floor(width / barsCount) - 2);
-
-      // Find max amp for normalization
-      let maxAmp = 0.01;
-      const peaks: number[] = [];
-      for (let i = 0; i < barsCount; i++) {
-        let sum = 0;
-        for (let j = 0; j < step; j++) {
-          sum += Math.abs(rawData[i * step + j] || 0);
-        }
-        const avg = sum / step;
-        peaks.push(avg);
-        if (avg > maxAmp) maxAmp = avg;
-      }
-
-      // Draw vertical bars with violet accent
-      for (let i = 0; i < barsCount; i++) {
-        const normalized = Math.min(1, peaks[i] / maxAmp);
-        const barHeight = Math.max(4, normalized * (height - 6));
+      for (let i = 0; i < peaks.length; i++) {
+        const barHeight = Math.max(4, peaks[i] * (height - 6));
         const x = i * (barWidth + 2);
         const y = (height - barHeight) / 2;
 
         ctx.fillStyle = '#8B5CF6';
         ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(x, y, barWidth, barHeight, 2) : ctx.rect(x, y, barWidth, barHeight);
+        if (ctx.roundRect) ctx.roundRect(x, y, barWidth, barHeight, 2);
+        else ctx.rect(x, y, barWidth, barHeight);
         ctx.fill();
       }
     } catch (e) {
@@ -149,14 +161,20 @@ export function CreateWizard() {
   // When audioFile changes, draw waveform
   useEffect(() => {
     if (audioFile) {
-      drawWaveformFromBlob(audioFile);
+      Promise.resolve().then(() => drawWaveformFromBlob(audioFile, audioFileName || 'audio'));
     } else {
-      setAudioDurationSec(null);
+      Promise.resolve().then(() => setAudioDurationSec(null));
     }
-  }, [audioFile, drawWaveformFromBlob]);
+  }, [audioFile, audioFileName, drawWaveformFromBlob]);
 
-  // Generate 9:14 poster thumbnail from a video file
-  const generateVideoThumbnail = (file: File): Promise<string> => {
+  // Generate 9:14 poster thumbnail with IndexedDB caching
+  const generateVideoThumbnail = async (file: File): Promise<string> => {
+    const fileKey = `${file.name}_${file.size}_${file.lastModified || 0}_thumb`;
+    const cachedThumb = await MediaCacheDb.get<string>(fileKey);
+    if (cachedThumb) {
+      return cachedThumb;
+    }
+
     return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
       const vid = document.createElement('video');
@@ -173,11 +191,14 @@ export function CreateWizard() {
         offCanvas.width = 180;
         offCanvas.height = 280; // 9:14 ratio
         const ctx = offCanvas.getContext('2d');
+        let thumbUrl = '';
         if (ctx) {
-          // Cover crop
           const srcAspect = (vid.videoWidth || 1) / (vid.videoHeight || 1);
           const dstAspect = offCanvas.width / offCanvas.height;
-          let sx = 0, sy = 0, sw = vid.videoWidth, sh = vid.videoHeight;
+          let sx = 0,
+            sy = 0,
+            sw = vid.videoWidth,
+            sh = vid.videoHeight;
           if (srcAspect > dstAspect) {
             sw = vid.videoHeight * dstAspect;
             sx = (vid.videoWidth - sw) / 2;
@@ -186,14 +207,19 @@ export function CreateWizard() {
             sy = (vid.videoHeight - sh) / 2;
           }
           ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, offCanvas.width, offCanvas.height);
-          resolve(offCanvas.toDataURL('image/jpeg', 0.8));
-        } else {
-          resolve('');
+          thumbUrl = offCanvas.toDataURL('image/jpeg', 0.8);
+          MediaCacheDb.set(fileKey, 'thumbnail', thumbUrl);
         }
+        // Cleanup video element & blob URL
+        vid.removeAttribute('src');
+        vid.load();
         URL.revokeObjectURL(url);
+        resolve(thumbUrl);
       };
 
       vid.onerror = () => {
+        vid.removeAttribute('src');
+        vid.load();
         URL.revokeObjectURL(url);
         resolve('');
       };
@@ -208,7 +234,6 @@ export function CreateWizard() {
       const combined = [...videoFiles, ...newFiles];
       setVideoFiles(combined);
 
-      // Generate thumbnails for new files
       const newThumbs = await Promise.all(newFiles.map(generateVideoThumbnail));
       setVideoThumbnails((prev) => [...prev, ...newThumbs]);
     }
@@ -237,6 +262,9 @@ export function CreateWizard() {
   // Remove image
   const removeImage = (idx: number) => {
     triggerHaptic('light');
+    if (imageThumbnails[idx] && imageThumbnails[idx].startsWith('blob:')) {
+      URL.revokeObjectURL(imageThumbnails[idx]);
+    }
     setImageFiles((prev) => prev.filter((_, i) => i !== idx));
     setImageThumbnails((prev) => prev.filter((_, i) => i !== idx));
   };
@@ -249,7 +277,6 @@ export function CreateWizard() {
       setMusicFile(file);
       setMusicFileName(file.name);
 
-      // Read duration
       const audio = new Audio(URL.createObjectURL(file));
       audio.onloadedmetadata = () => {
         setMusicDurationSec(audio.duration);

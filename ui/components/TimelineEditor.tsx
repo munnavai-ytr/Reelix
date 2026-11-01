@@ -45,112 +45,6 @@ export function TimelineEditor() {
     initialDuration: number;
   } | null>(null);
 
-  if (!currentPlan) return null;
-
-  const totalDuration = currentPlan.duration || 1;
-  const basePxPerSec = 35;
-  const pxPerSec = basePxPerSec * zoomLevel;
-  const timelineContentWidth = Math.max(700, Math.ceil(totalDuration * pxPerSec) + 100);
-
-  // 7 Lanes in order with specific tokens
-  const lanes = [
-    {
-      id: 'video',
-      label: STRINGS.studio.timeline.lanes.video,
-      color: LAYER_COLORS.video,
-      icon: VideoIcon,
-      layers: currentPlan.layers.filter((l) => l.type === 'video'),
-    },
-    {
-      id: 'voice',
-      label: STRINGS.studio.timeline.lanes.voice,
-      color: LAYER_COLORS.voice,
-      icon: Mic,
-      layers: currentPlan.layers.filter(
-        (l) =>
-          l.type === 'audio' &&
-          !l.name.toLowerCase().includes('music') &&
-          !l.name.toLowerCase().includes('sfx')
-      ),
-    },
-    {
-      id: 'captions',
-      label: STRINGS.studio.timeline.lanes.captions,
-      color: LAYER_COLORS.captions,
-      icon: MessageSquare,
-      layers: currentPlan.layers.filter((l) => l.type === 'caption'),
-    },
-    {
-      id: 'text',
-      label: STRINGS.studio.timeline.lanes.text,
-      color: LAYER_COLORS.text,
-      icon: Type,
-      layers: currentPlan.layers.filter((l) => l.type === 'text' || l.type === 'shape'),
-    },
-    {
-      id: 'music',
-      label: STRINGS.studio.timeline.lanes.music,
-      color: LAYER_COLORS.music,
-      icon: Music,
-      layers: currentPlan.layers.filter(
-        (l) => l.type === 'audio' && l.name.toLowerCase().includes('music')
-      ),
-    },
-    {
-      id: 'sfx',
-      label: STRINGS.studio.timeline.lanes.sfx,
-      color: LAYER_COLORS.sfx,
-      icon: Zap,
-      layers: currentPlan.layers.filter(
-        (l) => l.type === 'audio' && l.name.toLowerCase().includes('sfx')
-      ),
-    },
-    {
-      id: 'images',
-      label: STRINGS.studio.timeline.lanes.images,
-      color: LAYER_COLORS.images,
-      icon: Layers,
-      layers: currentPlan.layers.filter((l) => l.type === 'image'),
-    },
-  ];
-
-  // Playhead dragging & Timeline scrubbing
-  const handleTimelineScrub = (clientX: number) => {
-    if (!timelineContainerRef.current) return;
-    const rect = timelineContainerRef.current.getBoundingClientRect();
-    const scrollLeft = timelineContainerRef.current.scrollLeft;
-    // 72px gutter offset
-    const clickX = clientX - rect.left + scrollLeft - 72;
-    const clickedTime = Math.max(0, Math.min(totalDuration, clickX / pxPerSec));
-    setCurrentTime(clickedTime);
-  };
-
-  const handleMouseDownScrub = (e: React.MouseEvent) => {
-    setIsDraggingPlayhead(true);
-    handleTimelineScrub(e.clientX);
-  };
-
-  // Trimming handles logic
-  const handleTrimStart = (
-    e: React.MouseEvent | React.TouchEvent,
-    layerId: string,
-    edge: 'start' | 'end'
-  ) => {
-    e.stopPropagation();
-    triggerHaptic('selection');
-    const layer = currentPlan.layers.find((l) => l.id === layerId);
-    if (!layer) return;
-
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    setTrimmingState({
-      layerId,
-      edge,
-      startX: clientX,
-      initialStart: layer.startTime,
-      initialDuration: layer.duration,
-    });
-  };
-
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
@@ -194,7 +88,9 @@ export function TimelineEditor() {
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleUp);
     };
-  }, [isDraggingPlayhead, trimmingState, pxPerSec, totalDuration]);
+  }, [isDraggingPlayhead, trimmingState, pxPerSec, currentPlan?.duration]);
+
+  if (!currentPlan) return null;
 
   // Format second marks "0:00", "0:05", etc.
   const formatSec = (sec: number) => {

@@ -77,8 +77,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setConfirmModal(opts);
   }, []);
 
-  globalShowToast = showToast;
-  globalShowConfirm = showConfirm;
+  React.useEffect(() => {
+    globalShowToast = showToast;
+    globalShowConfirm = showConfirm;
+    return () => {
+      globalShowToast = null;
+      globalShowConfirm = null;
+    };
+  }, [showToast, showConfirm]);
 
   return (
     <ToastContext.Provider value={{ showToast, showConfirm }}>

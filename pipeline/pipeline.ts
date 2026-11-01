@@ -9,7 +9,7 @@ import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { AssetCache } from '../engine/renderer';
 import { ensureAssets } from '../engine/media';
 import { ApiKeysService } from '../storage/keys';
-import { ProjectDb } from '../storage/db';
+import { OpfsService } from '../storage/opfs';
 
 export interface GenerateShortsOptions {
   audioFile?: File | Blob;
@@ -93,6 +93,13 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
 
     if (transcription.processedBlob && transcription.processedDuration) {
       finalDuration = transcription.processedDuration;
+      try {
+        const filename = `voice_compacted_${Date.now()}.wav`;
+        const uri = await OpfsService.writeFile(filename, transcription.processedBlob);
+        finalVoiceUrl = await OpfsService.resolveToBlobUrl(uri);
+      } catch {
+        finalVoiceUrl = URL.createObjectURL(transcription.processedBlob);
+      }
     }
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);

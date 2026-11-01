@@ -10,16 +10,13 @@ import { AdminConsole } from '@/ui/components/AdminConsole';
 
 export default function AdminPage() {
   const [mounted, setMounted] = useState(false);
-  const [isPinRequired, setIsPinRequired] = useState(false);
-  const [isUnlocked, setIsUnlocked] = useState(true);
+  const [isPinRequired, setIsPinRequired] = useState(() => PinService.isPinSet());
+  const [isUnlocked, setIsUnlocked] = useState(() => !PinService.isPinSet());
   const [pinInput, setPinInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    setMounted(true);
-    const pinSet = PinService.isPinSet();
-    setIsPinRequired(pinSet);
-    setIsUnlocked(!pinSet);
+    Promise.resolve().then(() => setMounted(true));
   }, []);
 
   const handleUnlock = async (e: React.FormEvent) => {

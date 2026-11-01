@@ -13,20 +13,12 @@ import { triggerHaptic } from '../../storage/haptics';
 export function OnboardingModal() {
   const { showOnboarding, setShowOnboarding, setActiveTab } = useStudioStore();
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState(() => ApiKeysService.getKeys().gemini || '');
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-
   const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
   const [textModelOptions, setTextModelOptions] = useState<FormattedModelOption[]>([]);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
-
-  useEffect(() => {
-    const keys = ApiKeysService.getKeys();
-    if (keys.gemini) {
-      setGeminiKey(keys.gemini);
-    }
-  }, []);
 
   const loadModels = async (force = false) => {
     setIsRefreshingModels(true);
@@ -48,16 +40,25 @@ export function OnboardingModal() {
     setIsTesting(true);
     setTestResult(null);
 
-    const res = await ApiKeysService.testGemini(geminiKey);
-    setIsTesting(false);
-    setTestResult(res);
+    try {
+      const res = await ApiKeysService.testGemini(geminiKey);
+      setTestResult(res);
 
-    if (res.success) {
-      triggerHaptic('success');
-      ApiKeysService.saveKeys({ gemini: geminiKey.trim() });
-      await loadModels(true);
-    } else {
+      if (res.success) {
+        triggerHaptic('success');
+        ApiKeysService.saveKeys({ gemini: geminiKey.trim() });
+        await loadModels(true);
+      } else {
+        triggerHaptic('error');
+      }
+    } catch (err) {
+      setTestResult({
+        success: false,
+        message: err instanceof Error ? err.message : 'Failed to test API key',
+      });
       triggerHaptic('error');
+    } finally {
+      setIsTesting(false);
     }
   };
 

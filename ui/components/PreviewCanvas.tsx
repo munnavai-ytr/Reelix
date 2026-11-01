@@ -1,4 +1,4 @@
-// Real-Time 9:16 Vertical Video Preview Canvas (Unified Frame Renderer with Video Drift Sync)
+// Real-Time 9:16 Vertical Video Preview Canvas (Unified Frame Renderer with Video Drift Sync & Tab Pause)
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -47,9 +47,23 @@ export function PreviewCanvas() {
     }
 
     return () => {
-      mixer.stopAll();
+      mixer.close().catch(() => {});
     };
   }, [currentPlan]);
+
+  // Pause rendering when document/tab is hidden
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isPlaying) {
+        setIsPlaying(false);
+        audioMixerRef.current?.stopAll();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isPlaying, setIsPlaying]);
 
   const drawCurrentFrame = useCallback(
     (t: number) => {
@@ -79,6 +93,12 @@ export function PreviewCanvas() {
     lastTimeRef.current = performance.now();
 
     const loop = (now: number) => {
+      if (document.visibilityState === 'hidden') {
+        setIsPlaying(false);
+        audioMixerRef.current?.stopAll();
+        return;
+      }
+
       const deltaSec = (now - lastTimeRef.current) / 1000;
       lastTimeRef.current = now;
 

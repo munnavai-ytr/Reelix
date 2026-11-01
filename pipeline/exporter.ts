@@ -1,15 +1,17 @@
-// Robust WebCodecs + mp4-muxer Exporter with Codec Probing, Audio Track Encoding, Backpressure, and Presets
+// Robust WebCodecs + mp4-muxer Exporter with Codec Probing, Audio Track Encoding, Backpressure, Screen WakeLock, and Native Capacitor File Sharing
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { EditPlan, AudioLayer } from '../engine/types';
 import { renderFrame, AssetCache } from '../engine/renderer';
 import { computeAudioDuckingVolume } from '../engine/timeline';
 import { resolveSrc, seekVideosForExport } from '../engine/media';
+import { Logger } from '../storage/logger';
 
 export interface ExportProgress {
   percentage: number;
   currentFrame: number;
   totalFrames: number;
   phase: 'rendering' | 'encoding_audio' | 'muxing' | 'complete';
+  estimatedSecRemaining?: number;
 }
 
 export interface ExportOptions {
@@ -37,17 +39,55 @@ export async function exportVideoMp4(
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
   if (!ctx) throw new Error('Could not create 2D canvas context for export');
 
-  const hasWebCodecs = typeof window !== 'undefined' && 'VideoEncoder' in window && 'VideoFrame' in window;
-
-  if (hasWebCodecs) {
+  // Request WakeLock to keep screen awake during export
+  let wakeLockSentinel: unknown = null;
+  if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
     try {
-      return await exportViaWebCodecs(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
-    } catch (err) {
-      console.warn('WebCodecs export failed, attempting MediaRecorder fallback:', err);
+      wakeLockSentinel = await (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request('screen');
+    } catch {
+      // Wake lock request allowed to fail gracefully
     }
   }
 
-  return await exportViaMediaRecorder(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
+  // Warn if user attempts to leave tab during active export
+  const preventUnload = (e: BeforeUnloadEvent) => {
+    e.preventDefault();
+    e.returnValue = '';
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', preventUnload);
+  }
+
+  const cleanupExport = () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', preventUnload);
+    }
+    if (wakeLockSentinel && typeof (wakeLockSentinel as { release?: () => Promise<void> }).release === 'function') {
+      (wakeLockSentinel as { release: () => Promise<void> }).release().catch(() => {});
+    }
+  };
+
+  try {
+    const hasWebCodecs = typeof window !== 'undefined' && 'VideoEncoder' in window && 'VideoFrame' in window;
+
+    if (hasWebCodecs) {
+      try {
+        const result = await exportViaWebCodecs(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
+        cleanupExport();
+        return result;
+      } catch (err) {
+        console.warn('WebCodecs export failed, attempting MediaRecorder fallback:', err);
+        Logger.logError('exportVideoMp4 [WebCodecs Fallback]', err);
+      }
+    }
+
+    const fallbackResult = await exportViaMediaRecorder(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
+    cleanupExport();
+    return fallbackResult;
+  } catch (err) {
+    cleanupExport();
+    throw err;
+  }
 }
 
 async function probeBestSupportedVideoCodec(width: number, height: number, fps: number, bitrate: number): Promise<string> {
@@ -79,7 +119,7 @@ async function probeBestSupportedVideoCodec(width: number, height: number, fps: 
 }
 
 async function mixOfflineAudio(plan: EditPlan, sampleRate = 48000): Promise<AudioBuffer | null> {
-  const audioLayers = plan.layers.filter(l => l.type === 'audio' && (l as AudioLayer).src) as AudioLayer[];
+  const audioLayers = plan.layers.filter((l) => l.type === 'audio' && (l as AudioLayer).src) as AudioLayer[];
   if (audioLayers.length === 0) return null;
 
   const totalLengthSamples = Math.ceil(plan.duration * sampleRate);
@@ -148,7 +188,6 @@ async function exportViaWebCodecs(
   const chosenCodec = await probeBestSupportedVideoCodec(width, height, fps, bitrate);
   const target = new ArrayBufferTarget();
 
-  // Render offline audio mixdown
   onProgress({
     percentage: 5,
     currentFrame: 0,
@@ -158,7 +197,6 @@ async function exportViaWebCodecs(
 
   const mixedAudioBuffer = await mixOfflineAudio(plan, 48000);
 
-  // Check if AudioEncoder is available and AAC is supported
   let canEncodeAudio = false;
   if (mixedAudioBuffer && typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined') {
     try {
@@ -193,10 +231,8 @@ async function exportViaWebCodecs(
     fastStart: 'in-memory',
   });
 
-  // Setup Audio Encoder if audio track is active
-  let audioEncoder: AudioEncoder | null = null;
   if (canEncodeAudio && mixedAudioBuffer) {
-    audioEncoder = new AudioEncoder({
+    const audioEncoder = new AudioEncoder({
       output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
       error: (e) => console.warn('AudioEncoder error:', e),
     });
@@ -207,7 +243,6 @@ async function exportViaWebCodecs(
       bitrate: 128000,
     });
 
-    // Encode audio chunks (1024 frames per chunk)
     const sampleRate = 48000;
     const totalSamples = mixedAudioBuffer.length;
     const chunkSize = 1024;
@@ -255,22 +290,19 @@ async function exportViaWebCodecs(
     framerate: fps,
   });
 
+  const renderStartMs = performance.now();
+
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     if (encoderError) {
       throw encoderError;
     }
 
-    // Handle encoder backpressure to prevent memory exhaustion and hanging
     while (videoEncoder.encodeQueueSize > 6) {
       await new Promise((r) => setTimeout(r, 16));
     }
 
     const t = frameIdx / fps;
-
-    // Seek video elements to current frame time
     await seekVideosForExport(plan, t, assets);
-
-    // Render frame to canvas
     renderFrame(ctx, plan, t, width, height, assets);
 
     const timestampMicros = Math.round(t * 1_000_000);
@@ -280,12 +312,17 @@ async function exportViaWebCodecs(
     videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
     videoFrame.close();
 
+    const elapsedSec = (performance.now() - renderStartMs) / 1000;
+    const measuredFps = (frameIdx + 1) / Math.max(0.001, elapsedSec);
+    const estimatedSecRemaining = Math.max(0, Math.ceil((totalFrames - frameIdx - 1) / Math.max(1, measuredFps)));
+
     const pct = Math.floor(10 + (frameIdx / totalFrames) * 82);
     onProgress({
       percentage: pct,
       currentFrame: frameIdx,
       totalFrames,
       phase: 'rendering',
+      estimatedSecRemaining,
     });
 
     if (frameIdx % 15 === 0) {
@@ -345,11 +382,16 @@ async function exportViaMediaRecorder(
   });
 
   recorder.start();
+  const renderStartMs = performance.now();
 
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     const t = frameIdx / fps;
     await seekVideosForExport(plan, t, assets);
     renderFrame(ctx, plan, t, width, height, assets);
+
+    const elapsedSec = (performance.now() - renderStartMs) / 1000;
+    const measuredFps = (frameIdx + 1) / Math.max(0.001, elapsedSec);
+    const estimatedSecRemaining = Math.max(0, Math.ceil((totalFrames - frameIdx - 1) / Math.max(1, measuredFps)));
 
     const pct = Math.floor((frameIdx / totalFrames) * 95);
     onProgress({
@@ -357,6 +399,7 @@ async function exportViaMediaRecorder(
       currentFrame: frameIdx,
       totalFrames,
       phase: 'rendering',
+      estimatedSecRemaining,
     });
 
     await new Promise((r) => setTimeout(r, 1000 / fps));
@@ -380,34 +423,50 @@ export async function downloadOrShareVideo(blob: Blob, filename: string): Promis
     typeof window !== 'undefined' &&
     (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
 
-  const url = URL.createObjectURL(blob);
-
   if (isCapacitorNative) {
-    const capacitor = (
-      window as unknown as {
-        Capacitor?: {
-          Plugins?: { Share?: { share: (opts: { title: string; url: string }) => Promise<void> } };
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          const base64 = res.includes(',') ? res.split(',')[1] : res;
+          resolve(base64);
         };
-      }
-    )?.Capacitor;
+        reader.readAsDataURL(blob);
+      });
+      const base64Data = await base64Promise;
 
-    if (capacitor?.Plugins?.Share) {
-      try {
-        await capacitor.Plugins.Share.share({
-          title: 'Reelix Short Video',
-          url,
+      const plugins = (window as unknown as { Capacitor?: { Plugins?: Record<string, any> } }).Capacitor?.Plugins;
+      const filesystem = plugins?.Filesystem;
+      const share = plugins?.Share;
+
+      if (filesystem) {
+        const targetName = filename.endsWith('.mp4') ? filename : `${filename}.mp4`;
+        const writeResult = await filesystem.writeFile({
+          path: targetName,
+          data: base64Data,
+          directory: 'CACHE',
         });
-        return;
-      } catch {
-        // fallback
+
+        if (share) {
+          await share.share({
+            title: 'Reelix Short Video',
+            url: writeResult.uri,
+          });
+          return;
+        }
       }
+    } catch (e) {
+      console.warn('Native filesystem share failed, falling back to browser download:', e);
     }
   }
 
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename.endsWith('.mp4') ? filename : `${filename}.mp4`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }

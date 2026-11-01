@@ -1,4 +1,4 @@
-// IndexedDB Storage for Reelix Projects, Edit Plans, and Cache
+// IndexedDB Storage for Reelix Projects, Edit Plans, and Media Cache (Waveforms & Thumbnails)
 import { EditPlan } from '../engine/types';
 
 export interface ProjectRecord {
@@ -11,9 +11,17 @@ export interface ProjectRecord {
   editPlan: EditPlan;
 }
 
+export interface MediaCacheRecord {
+  key: string;
+  type: 'waveform' | 'thumbnail';
+  data: unknown;
+  updatedAt: number;
+}
+
 const DB_NAME = 'reelix_studio_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_PROJECTS = 'projects';
+const STORE_MEDIA_CACHE = 'media_cache';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,6 +34,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
         const store = db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
         store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_MEDIA_CACHE)) {
+        db.createObjectStore(STORE_MEDIA_CACHE, { keyPath: 'key' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -87,7 +98,37 @@ export const ProjectDb = {
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
-  }
+  },
+};
+
+export const MediaCacheDb = {
+  async get<T = unknown>(key: string): Promise<T | null> {
+    try {
+      const db = await openDb();
+      return new Promise((resolve) => {
+        const tx = db.transaction(STORE_MEDIA_CACHE, 'readonly');
+        const store = tx.objectStore(STORE_MEDIA_CACHE);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result ? (req.result.data as T) : null);
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  async set(key: string, type: 'waveform' | 'thumbnail', data: unknown): Promise<void> {
+    try {
+      const db = await openDb();
+      return new Promise((resolve) => {
+        const tx = db.transaction(STORE_MEDIA_CACHE, 'readwrite');
+        const store = tx.objectStore(STORE_MEDIA_CACHE);
+        store.put({ key, type, data, updatedAt: Date.now() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+    } catch {}
+  },
 };
 
 export const ProjectsDB = {

@@ -61,6 +61,7 @@ export function detectSilences(
 ): { silences: AudioSegment[]; speechSegments: AudioSegment[] } {
   const windowSize = Math.floor(sampleRate * 0.02); // 20ms
   const totalWindows = Math.floor(pcmData.length / windowSize);
+  const totalDuration = pcmData.length / sampleRate;
 
   const isSpeech = new Uint8Array(totalWindows);
 
@@ -97,17 +98,22 @@ export function detectSilences(
     if (smoothed[w] === 1 && currentStart === -1) {
       currentStart = w * 0.02;
     } else if (smoothed[w] === 0 && currentStart !== -1) {
-      const end = w * 0.02;
-      if (end - currentStart >= 0.1) {
-        speechSegments.push({ start: currentStart, end });
+      const rawEnd = w * 0.02;
+      const start = Math.max(0, currentStart);
+      const end = Math.min(totalDuration, rawEnd);
+      if (end - start >= 0.1) {
+        speechSegments.push({ start, end });
       }
       currentStart = -1;
     }
   }
 
   if (currentStart !== -1) {
-    const totalDuration = pcmData.length / sampleRate;
-    speechSegments.push({ start: currentStart, end: totalDuration });
+    const start = Math.max(0, currentStart);
+    const end = totalDuration;
+    if (end - start >= 0.1) {
+      speechSegments.push({ start, end });
+    }
   }
 
   // Determine silences between speech segments
@@ -119,7 +125,6 @@ export function detectSilences(
     }
     cursor = seg.end;
   }
-  const totalDuration = pcmData.length / sampleRate;
   if (totalDuration - cursor >= minSilenceDuration) {
     silences.push({ start: cursor, end: totalDuration });
   }
@@ -131,59 +136,90 @@ export function detectSilences(
  * Compact speech segments by removing silences and concatenating speech back-to-back.
  */
 export function compactSpeechAudio(
-  pcmData: Float32Array,
-  sampleRate: number,
-  speechSegments: AudioSegment[]
+  pcm: Float32Array,
+  sr: number,
+  segs: AudioSegment[]
 ): {
   compactedPcm: Float32Array;
   compactedDuration: number;
   mapTimeToCompacted: (originalTime: number) => number;
+  ranges: { a: number; b: number }[];
 } {
-  if (speechSegments.length === 0) {
+  const ranges = segs
+    .map((s) => ({
+      a: Math.max(0, Math.floor(s.start * sr)),
+      b: Math.min(pcm.length, Math.floor(s.end * sr)),
+    }))
+    .filter((r) => r.b > r.a);
+
+  if (ranges.length === 0) {
     return {
-      compactedPcm: pcmData,
-      compactedDuration: pcmData.length / sampleRate,
-      mapTimeToCompacted: (t) => t,
+      compactedPcm: pcm,
+      compactedDuration: pcm.length / sr,
+      mapTimeToCompacted: (t: number) => t,
+      ranges: [] as { a: number; b: number }[],
     };
   }
 
-  let totalSamples = 0;
-  for (const seg of speechSegments) {
-    const count = Math.floor((seg.end - seg.start) * sampleRate);
-    totalSamples += count;
-  }
+  const fade = Math.floor(sr * 0.012); // 12 ms fade to avoid clicks at cuts
 
-  const compactedPcm = new Float32Array(totalSamples);
+  // calculate exact output total length
+  let totalLen = 0;
+  for (const r of ranges) totalLen += r.b - r.a;
+  const compactedPcm = new Float32Array(totalLen);
+
   let writeOffset = 0;
+  // accumulate mapped boundaries for time mapping function
+  const cumulativeOutputStart: number[] = [];
 
-  for (const seg of speechSegments) {
-    const startSample = Math.floor(seg.start * sampleRate);
-    const endSample = Math.min(pcmData.length, Math.floor(seg.end * sampleRate));
-    const slice = pcmData.subarray(startSample, endSample);
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i];
+    const len = r.b - r.a;
+    cumulativeOutputStart.push(writeOffset / sr);
+
+    // copy slice
+    const slice = pcm.subarray(r.a, r.b);
     compactedPcm.set(slice, writeOffset);
-    writeOffset += slice.length;
-  }
 
-  const compactedDuration = totalSamples / sampleRate;
+    // Apply 12ms fade in at start of segment (except very first segment if starting at 0)
+    if (r.a > 0 && len > fade * 2) {
+      for (let k = 0; k < fade; k++) {
+        compactedPcm[writeOffset + k] *= k / fade;
+      }
+    }
+    // Apply 12ms fade out at end of segment (except very end of audio)
+    if (r.b < pcm.length && len > fade * 2) {
+      for (let k = 0; k < fade; k++) {
+        compactedPcm[writeOffset + len - 1 - k] *= k / fade;
+      }
+    }
+
+    writeOffset += len;
+  }
 
   const mapTimeToCompacted = (origT: number): number => {
-    let accCompacted = 0;
-    for (const seg of speechSegments) {
-      if (origT < seg.start) {
-        return accCompacted;
+    for (let i = 0; i < ranges.length; i++) {
+      const r = ranges[i];
+      const startSec = r.a / sr;
+      const endSec = r.b / sr;
+      if (origT >= startSec && origT <= endSec) {
+        return cumulativeOutputStart[i] + (origT - startSec);
       }
-      if (origT <= seg.end) {
-        return accCompacted + (origT - seg.start);
+      if (origT < startSec) {
+        return cumulativeOutputStart[i];
       }
-      accCompacted += seg.end - seg.start;
     }
-    return Math.min(compactedDuration, accCompacted);
+    return cumulativeOutputStart.length > 0
+      ? cumulativeOutputStart[cumulativeOutputStart.length - 1] +
+          (ranges[ranges.length - 1].b - ranges[ranges.length - 1].a) / sr
+      : origT;
   };
 
   return {
     compactedPcm,
-    compactedDuration,
+    compactedDuration: totalLen / sr,
     mapTimeToCompacted,
+    ranges,
   };
 }
 
@@ -245,18 +281,18 @@ export async function transcribeAudio(
   let realDuration = audioDuration && audioDuration > 0 ? audioDuration : decodedDuration;
   let finalWavBuffer = initialWav;
   let processedBlob: Blob | undefined = undefined;
-
-  let mapTime = (t: number) => t;
+  let noticeMsg: string | undefined = undefined;
 
   if (removeSilence) {
-    const { speechSegments } = detectSilences(pcmData, 16000);
-    if (speechSegments.length > 0) {
+    const { silences, speechSegments } = detectSilences(pcmData, 16000);
+    if (speechSegments.length > 0 && silences.length > 0) {
+      const totalSavedSec = silences.reduce((acc, s) => acc + (s.end - s.start), 0);
       const compacted = compactSpeechAudio(pcmData, 16000, speechSegments);
       pcmData = compacted.compactedPcm;
       realDuration = compacted.compactedDuration;
       finalWavBuffer = encode16BitWav(pcmData, 16000);
       processedBlob = new Blob([finalWavBuffer], { type: 'audio/wav' });
-      mapTime = compacted.mapTimeToCompacted;
+      noticeMsg = `Removed ${silences.length} pauses (${totalSavedSec.toFixed(1)} s saved)`;
     }
   }
 
@@ -361,6 +397,7 @@ Do not summarize or skip words. Return JSON strictly according to schema:
           words: alignedWords,
           processedBlob,
           processedDuration: realDuration,
+          ...(noticeMsg ? { notice: noticeMsg } : {}),
         };
       }
 
@@ -370,6 +407,7 @@ Do not summarize or skip words. Return JSON strictly according to schema:
         words: formattedWords,
         processedBlob,
         processedDuration: realDuration,
+        ...(noticeMsg ? { notice: noticeMsg } : {}),
       };
     }
   } catch (err) {

@@ -24,7 +24,6 @@ interface ModelsResponse {
 }
 
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const DEFAULT_TEXT_FALLBACK = 'gemini-2.5-flash'; // Fallback if API list unavailable, or modern 3.x
 const CACHE_KEY_PREFIX = 'reelix_gemini_models_v2_';
 
 export function isLegacyModel(name: string): boolean {
@@ -114,7 +113,11 @@ export async function listAvailableModelNames(forceRefresh = false): Promise<str
     }
   }
 
-  const { models } = await fetchRemoteModelsWithDetail(apiKey);
+  const { models, error } = await fetchRemoteModelsWithDetail(apiKey);
+  if (error) {
+    throw new Error(`Could not load the Gemini model list: ${error}. Check your API key and internet.`);
+  }
+
   if (models.length > 0 && typeof window !== 'undefined') {
     try {
       localStorage.setItem(storageKey, JSON.stringify({
@@ -137,7 +140,15 @@ function extractVersionNum(name: string): number {
 export async function resolveTextModel(preferredModel?: string, forceRefresh = false): Promise<string> {
   const userChoice = preferredModel || SystemPromptsService.getConfig().selectedModel;
 
-  const available = await listAvailableModelNames(forceRefresh);
+  let available: string[] = [];
+  try {
+    available = await listAvailableModelNames(forceRefresh);
+  } catch (err) {
+    if (userChoice && userChoice !== 'auto' && !isLegacyModel(userChoice)) {
+      return userChoice;
+    }
+    throw err;
+  }
 
   if (userChoice && userChoice !== 'auto' && !isLegacyModel(userChoice)) {
     if (available.length === 0 || available.includes(userChoice)) {
@@ -146,11 +157,10 @@ export async function resolveTextModel(preferredModel?: string, forceRefresh = f
   }
 
   if (available.length === 0) {
-    return DEFAULT_TEXT_FALLBACK;
+    throw new Error('Could not load the Gemini model list: No models returned. Check your API key and internet.');
   }
 
-  // 1. Look for newest gemini-X.Y-flash (e.g. gemini-2.5-flash or gemini-3.x-flash if present)
-  // Exclude: tts, image, live, audio, embedding, lite, thinking, exp
+  // 1. Look for newest gemini-X.Y-flash
   const pureFlashModels = available.filter(m => {
     const isFlash = /flash/i.test(m);
     const hasForbidden = /(tts|image|live|audio|embedding|lite|thinking|exp)/i.test(m);
@@ -176,7 +186,7 @@ export async function resolveTextModel(preferredModel?: string, forceRefresh = f
     return anyGemini[0];
   }
 
-  return DEFAULT_TEXT_FALLBACK;
+  return available[0];
 }
 
 export interface FormattedModelOption {

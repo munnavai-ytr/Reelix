@@ -41,8 +41,13 @@ export function SettingsModal() {
   };
 
   useEffect(() => {
-    if (keys.gemini && keys.gemini.trim().length > 10) {
-      loadModels();
+    const k = ApiKeysService.getKeys();
+    if (k.gemini && k.gemini.trim().length > 10) {
+      getFilteredModelLists(false)
+        .then(({ textModels }) => {
+          setTextModelOptions(textModels);
+        })
+        .catch(() => {});
     }
   }, []);
 
