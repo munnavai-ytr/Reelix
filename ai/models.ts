@@ -24,21 +24,14 @@ interface ModelsResponse {
 }
 
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const DEFAULT_TEXT_FALLBACK = 'gemini-3.8-flash';
-const DEFAULT_TTS_FALLBACK = 'gemini-3.8-flash-lite-tts';
-
-interface CachedModelsData {
-  timestamp: number;
-  keyHash: string;
-  models: string[];
-}
-
-const CACHE_KEY_PREFIX = 'reelix_gemini_models_v1_';
+const DEFAULT_TEXT_FALLBACK = 'gemini-2.5-flash'; // Fallback if API list unavailable, or modern 3.x
+const CACHE_KEY_PREFIX = 'reelix_gemini_models_v2_';
 
 export function isLegacyModel(name: string): boolean {
   if (!name) return true;
   const cleanName = name.replace(/^models\//, '');
-  return /^gemini-(1\.|2\.)/i.test(cleanName);
+  // Disallow Gemini 1.x and any defunct models
+  return /^gemini-1\./i.test(cleanName) || cleanName.includes('gemini-pro') || cleanName.includes('gemini-1.0');
 }
 
 export function invalidateModelCache(): void {
@@ -82,7 +75,9 @@ export async function fetchRemoteModelsWithDetail(apiKey: string): Promise<{ mod
         for (const m of data.models) {
           if (m.supportedGenerationMethods?.includes('generateContent')) {
             const cleanName = m.name.replace(/^models\//, '');
-            allModels.push(cleanName);
+            if (!isLegacyModel(cleanName)) {
+              allModels.push(cleanName);
+            }
           }
         }
       }
@@ -109,7 +104,7 @@ export async function listAvailableModelNames(forceRefresh = false): Promise<str
     try {
       const cached = localStorage.getItem(storageKey);
       if (cached) {
-        const parsed: CachedModelsData = JSON.parse(cached);
+        const parsed: { timestamp: number; models: string[] } = JSON.parse(cached);
         if (Date.now() - parsed.timestamp < CACHE_TTL_MS && parsed.models.length > 0) {
           return parsed.models;
         }
@@ -122,12 +117,10 @@ export async function listAvailableModelNames(forceRefresh = false): Promise<str
   const { models } = await fetchRemoteModelsWithDetail(apiKey);
   if (models.length > 0 && typeof window !== 'undefined') {
     try {
-      const cacheData: CachedModelsData = {
+      localStorage.setItem(storageKey, JSON.stringify({
         timestamp: Date.now(),
-        keyHash,
         models,
-      };
-      localStorage.setItem(storageKey, JSON.stringify(cacheData));
+      }));
     } catch {
       // Ignore cache write errors
     }
@@ -156,12 +149,12 @@ export async function resolveTextModel(preferredModel?: string, forceRefresh = f
     return DEFAULT_TEXT_FALLBACK;
   }
 
-  // 1. Look for newest gemini-X.Y-flash matching /^gemini-\d+(\.\d+)?-flash$/
+  // 1. Look for newest gemini-X.Y-flash (e.g. gemini-2.5-flash or gemini-3.x-flash if present)
   // Exclude: tts, image, live, audio, embedding, lite, thinking, exp
   const pureFlashModels = available.filter(m => {
-    const isFlashPattern = /^gemini-\d+(\.\d+)?-flash$/i.test(m);
+    const isFlash = /flash/i.test(m);
     const hasForbidden = /(tts|image|live|audio|embedding|lite|thinking|exp)/i.test(m);
-    return isFlashPattern && !hasForbidden;
+    return isFlash && !hasForbidden;
   });
 
   if (pureFlashModels.length > 0) {
@@ -169,14 +162,14 @@ export async function resolveTextModel(preferredModel?: string, forceRefresh = f
     return pureFlashModels[0];
   }
 
-  // 2. Fallback: Other flash models (not lite)
-  const otherFlash = available.filter(m => /flash/i.test(m) && !/lite/i.test(m) && !/tts/i.test(m) && !/live/i.test(m));
-  if (otherFlash.length > 0) {
-    otherFlash.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
-    return otherFlash[0];
+  // 2. Fallback: Any other flash model
+  const anyFlash = available.filter(m => /flash/i.test(m) && !/tts/i.test(m));
+  if (anyFlash.length > 0) {
+    anyFlash.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
+    return anyFlash[0];
   }
 
-  // 3. Fallback: Any non-legacy gemini text model
+  // 3. Fallback: Any non-legacy gemini model
   const anyGemini = available.filter(m => /^gemini-/i.test(m) && !isLegacyModel(m) && !/tts/i.test(m));
   if (anyGemini.length > 0) {
     anyGemini.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
@@ -184,36 +177,6 @@ export async function resolveTextModel(preferredModel?: string, forceRefresh = f
   }
 
   return DEFAULT_TEXT_FALLBACK;
-}
-
-export async function resolveTtsModel(forceRefresh = false): Promise<string> {
-  const userChoice = SystemPromptsService.getConfig().selectedTtsModel;
-  const available = await listAvailableModelNames(forceRefresh);
-
-  if (userChoice && userChoice !== 'auto' && !isLegacyModel(userChoice)) {
-    if (available.length === 0 || available.includes(userChoice)) {
-      return userChoice;
-    }
-  }
-
-  if (available.length === 0) {
-    return DEFAULT_TTS_FALLBACK;
-  }
-
-  const ttsModels = available.filter(m => /tts/i.test(m));
-  if (ttsModels.length === 0) {
-    return DEFAULT_TTS_FALLBACK;
-  }
-
-  // Prefer flash tts models
-  const flashTts = ttsModels.filter(m => /flash/i.test(m));
-  if (flashTts.length > 0) {
-    flashTts.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
-    return flashTts[0];
-  }
-
-  ttsModels.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
-  return ttsModels[0];
 }
 
 export interface FormattedModelOption {
@@ -224,11 +187,10 @@ export interface FormattedModelOption {
 
 export async function getFilteredModelLists(forceRefresh = false): Promise<{
   textModels: FormattedModelOption[];
-  ttsModels: FormattedModelOption[];
 }> {
   const available = await listAvailableModelNames(forceRefresh);
 
-  // Filter text models: exclude tts, embedding, imagen, veo, live, robotics, legacy 1.x / 2.x
+  // Filter text models: exclude tts, embedding, imagen, veo, live, robotics, legacy 1.x
   const textRaw = available.filter(m => {
     if (isLegacyModel(m)) return false;
     const lower = m.toLowerCase();
@@ -236,7 +198,7 @@ export async function getFilteredModelLists(forceRefresh = false): Promise<{
     return !forbidden.test(lower);
   });
 
-  // Sort text models: Flash models first (newest version first), then Flash-lite, then Pro, then others
+  // Sort text models: highest version first
   textRaw.sort((a, b) => {
     const vA = extractVersionNum(a);
     const vB = extractVersionNum(b);
@@ -267,15 +229,5 @@ export async function getFilteredModelLists(forceRefresh = false): Promise<{
     };
   });
 
-  // Filter TTS models: contain tts
-  const ttsRaw = available.filter(m => /tts/i.test(m) && !isLegacyModel(m));
-  ttsRaw.sort((a, b) => extractVersionNum(b) - extractVersionNum(a));
-
-  const ttsModels: FormattedModelOption[] = ttsRaw.map(name => ({
-    name,
-    label: `${name} (Speech Voice)`,
-    category: 'other',
-  }));
-
-  return { textModels, ttsModels };
+  return { textModels };
 }

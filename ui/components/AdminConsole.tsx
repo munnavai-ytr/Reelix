@@ -44,7 +44,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
   const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
   const [promptsSaved, setPromptsSaved] = useState(false);
   const [adminTextModels, setAdminTextModels] = useState<FormattedModelOption[]>([]);
-  const [adminTtsModels, setAdminTtsModels] = useState<FormattedModelOption[]>([]);
 
   // Brand Kit settings
   const [brandKit, setBrandKit] = useState<BrandKitSettings>(() => BrandKitService.getSettings());
@@ -80,7 +79,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
         setLibraryItems(items);
         setDeviceCaps(caps);
         setAdminTextModels(models.textModels);
-        setAdminTtsModels(models.ttsModels);
       }
     });
     return () => {
@@ -441,9 +439,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
                 <button
                   type="button"
                   onClick={async () => {
-                    const { textModels, ttsModels } = await getFilteredModelLists(true);
+                    const { textModels } = await getFilteredModelLists(true);
                     setAdminTextModels(textModels);
-                    setAdminTtsModels(ttsModels);
                   }}
                   className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold"
                 >
@@ -457,20 +454,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onLock }) => {
               >
                 <option value="auto">Auto Model Discovery (Recommended)</option>
                 {adminTextModels.map(m => (
-                  <option key={m.name} value={m.name}>{m.label}</option>
-                ))}
-              </select>
-
-              <label className="text-xs font-semibold text-white/70 block pt-2 border-t border-white/5">
-                Default Voice (TTS) Model
-              </label>
-              <select
-                value={promptConfig.selectedTtsModel || 'auto'}
-                onChange={e => setPromptConfig({ ...promptConfig, selectedTtsModel: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white focus:outline-none focus:border-violet-500"
-              >
-                <option value="auto">Auto Model Discovery (Recommended)</option>
-                {adminTtsModels.map(m => (
                   <option key={m.name} value={m.name}>{m.label}</option>
                 ))}
               </select>

@@ -1,4 +1,4 @@
-// Media resolution & preloading service for OPFS, Object URLs, and Preview Syncing
+// Media resolution, preloading, video drift sync & export seeking
 import { EditPlan, Layer, VideoLayer } from './types';
 import { AssetCache } from './renderer';
 import { OpfsService } from '../storage/opfs';
@@ -20,13 +20,32 @@ export async function resolveSrc(src: string): Promise<string> {
   return src;
 }
 
-export async function ensureAssets(plan: EditPlan, existingAssets?: AssetCache): Promise<AssetCache> {
+export function layerVideoTime(l: VideoLayer, t: number, video?: HTMLVideoElement): number {
+  const trimIn = l.trimIn || 0;
+  const elapsed = t - l.startTime;
+  let target = trimIn + elapsed;
+  if (video && video.duration && target >= video.duration) {
+    if (l.loop) {
+      target = trimIn + (elapsed % Math.max(0.1, video.duration - trimIn));
+    } else {
+      target = Math.min(target, Math.max(0, video.duration - 0.05));
+    }
+  }
+  return Math.max(0, target);
+}
+
+export async function ensureAssets(
+  plan: EditPlan,
+  existingAssets?: AssetCache,
+  onChange?: () => void
+): Promise<AssetCache> {
   const cache: AssetCache = {
     videos: existingAssets?.videos ? new Map(existingAssets.videos) : new Map(),
     images: existingAssets?.images ? new Map(existingAssets.images) : new Map(),
   };
 
   const loadPromises: Promise<void>[] = [];
+  let newLoadedCount = 0;
 
   for (const layer of plan.layers) {
     if (layer.type === 'video' && layer.src) {
@@ -41,19 +60,39 @@ export async function ensureAssets(plan: EditPlan, existingAssets?: AssetCache):
           v.muted = true;
           v.playsInline = true;
           v.preload = 'auto';
-          await new Promise((resolve) => {
+          await new Promise<void>((resolve) => {
             if (v.readyState >= 2) {
-              resolve(true);
+              resolve();
             } else {
-              v.onloadeddata = () => resolve(true);
-              v.onerror = () => resolve(false);
-              setTimeout(() => resolve(false), 3000); // 3s timeout cap
+              const onLoaded = () => {
+                cleanup();
+                resolve();
+              };
+              const onError = () => {
+                cleanup();
+                resolve();
+              };
+              const timer = setTimeout(() => {
+                cleanup();
+                resolve();
+              }, 4000);
+              const cleanup = () => {
+                v.removeEventListener('loadeddata', onLoaded);
+                v.removeEventListener('canplay', onLoaded);
+                v.removeEventListener('error', onError);
+                clearTimeout(timer);
+              };
+              v.addEventListener('loadeddata', onLoaded);
+              v.addEventListener('canplay', onLoaded);
+              v.addEventListener('error', onError);
             }
           });
           cache.videos.set(srcKey, v);
           if (resolved !== srcKey) {
             cache.videos.set(resolved, v);
           }
+          newLoadedCount++;
+          onChange?.();
         })();
         loadPromises.push(p);
       }
@@ -66,19 +105,37 @@ export async function ensureAssets(plan: EditPlan, existingAssets?: AssetCache):
           const img = new Image();
           img.src = resolved;
           img.crossOrigin = 'anonymous';
-          await new Promise((resolve) => {
-            if (img.complete) {
-              resolve(true);
+          await new Promise<void>((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+              resolve();
             } else {
-              img.onload = () => resolve(true);
-              img.onerror = () => resolve(false);
-              setTimeout(() => resolve(false), 3000);
+              const onLoaded = () => {
+                cleanup();
+                resolve();
+              };
+              const onError = () => {
+                cleanup();
+                resolve();
+              };
+              const timer = setTimeout(() => {
+                cleanup();
+                resolve();
+              }, 4000);
+              const cleanup = () => {
+                img.removeEventListener('load', onLoaded);
+                img.removeEventListener('error', onError);
+                clearTimeout(timer);
+              };
+              img.addEventListener('load', onLoaded);
+              img.addEventListener('error', onError);
             }
           });
           cache.images.set(srcKey, img);
           if (resolved !== srcKey) {
             cache.images.set(resolved, img);
           }
+          newLoadedCount++;
+          onChange?.();
         })();
         loadPromises.push(p);
       }
@@ -86,20 +143,27 @@ export async function ensureAssets(plan: EditPlan, existingAssets?: AssetCache):
   }
 
   await Promise.allSettled(loadPromises);
+  if (newLoadedCount > 0) {
+    onChange?.();
+  }
   return cache;
 }
 
-export function syncPreviewVideos(plan: EditPlan, currentTime: number, assets: AssetCache, isPlaying: boolean): void {
+export function syncPreviewVideos(
+  plan: EditPlan,
+  currentTime: number,
+  assets: AssetCache,
+  isPlaying: boolean
+): void {
   for (const layer of plan.layers) {
     if (layer.type === 'video' && layer.src) {
       const video = assets.videos.get(layer.src);
       if (video) {
         const isActive = currentTime >= layer.startTime && currentTime <= (layer.startTime + layer.duration);
         if (isActive) {
-          const trimIn = layer.trimIn || 0;
-          const targetVideoTime = trimIn + (currentTime - layer.startTime);
+          const targetVideoTime = layerVideoTime(layer, currentTime, video);
           const drift = Math.abs(video.currentTime - targetVideoTime);
-          if (drift > 0.05) {
+          if (drift > 0.08) {
             video.currentTime = targetVideoTime;
           }
           if (isPlaying && video.paused && video.readyState >= 2) {
@@ -112,5 +176,49 @@ export function syncPreviewVideos(plan: EditPlan, currentTime: number, assets: A
         }
       }
     }
+  }
+}
+
+export async function seekVideosForExport(
+  plan: EditPlan,
+  currentTime: number,
+  assets: AssetCache
+): Promise<void> {
+  const promises: Promise<void>[] = [];
+
+  for (const layer of plan.layers) {
+    if (layer.type === 'video' && layer.src) {
+      const isActive = currentTime >= layer.startTime && currentTime < (layer.startTime + layer.duration);
+      if (isActive) {
+        const video = assets.videos.get(layer.src);
+        if (video) {
+          const targetTime = layerVideoTime(layer, currentTime, video);
+          if (Math.abs(video.currentTime - targetTime) > 0.03) {
+            promises.push(
+              new Promise<void>((resolve) => {
+                const onSeeked = () => {
+                  cleanup();
+                  resolve();
+                };
+                const timer = setTimeout(() => {
+                  cleanup();
+                  resolve();
+                }, 250);
+                const cleanup = () => {
+                  video.removeEventListener('seeked', onSeeked);
+                  clearTimeout(timer);
+                };
+                video.addEventListener('seeked', onSeeked, { once: true });
+                video.currentTime = targetTime;
+              })
+            );
+          }
+        }
+      }
+    }
+  }
+
+  if (promises.length > 0) {
+    await Promise.allSettled(promises);
   }
 }

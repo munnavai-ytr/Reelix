@@ -18,7 +18,6 @@ export function SettingsModal() {
 
   // Dynamic model lists
   const [textModelOptions, setTextModelOptions] = useState<FormattedModelOption[]>([]);
-  const [ttsModelOptions, setTtsModelOptions] = useState<FormattedModelOption[]>([]);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
 
   // PIN state
@@ -31,9 +30,8 @@ export function SettingsModal() {
     setIsRefreshingModels(true);
     try {
       if (force) invalidateModelCache();
-      const { textModels, ttsModels } = await getFilteredModelLists(force);
+      const { textModels } = await getFilteredModelLists(force);
       setTextModelOptions(textModels);
-      setTtsModelOptions(ttsModels);
     } catch (err) {
       console.warn('Failed to load dynamic model list:', err);
     } finally {
@@ -54,7 +52,7 @@ export function SettingsModal() {
     alert('Settings saved successfully!');
   };
 
-  const handleModelChange = (key: 'selectedModel' | 'selectedTtsModel', val: string) => {
+  const handleModelChange = (key: 'selectedModel', val: string) => {
     triggerHaptic('light');
     const updated = { ...promptConfig, [key]: val };
     setPromptConfig(updated);
@@ -134,7 +132,7 @@ export function SettingsModal() {
                 <span>Gemini API Key</span>
                 <span className="text-[10px] text-rose-400 font-bold">*Required</span>
               </span>
-              <p className="text-[11px] text-slate-400 mt-0.5">Powers Director AI, scene analysis, and TTS voiceover</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Powers Director AI, clip analysis, and speech transcription</p>
             </div>
             <button
               onClick={() => setShowKey(prev => ({ ...prev, gemini: !prev.gemini }))}
@@ -175,7 +173,7 @@ export function SettingsModal() {
             </div>
           )}
 
-          {/* Model Selection Dropdowns */}
+          {/* Model Selection Dropdown */}
           <div className="pt-3 border-t border-white/5 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -193,38 +191,22 @@ export function SettingsModal() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] text-slate-300 mb-1 block">Text Model</label>
-                <select
-                  value={promptConfig.selectedModel || 'auto'}
-                  onChange={e => handleModelChange('selectedModel', e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
-                >
-                  <option value="auto">Auto (recommended)</option>
-                  {textModelOptions.map(m => (
-                    <option key={m.name} value={m.name}>{m.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-300 mb-1 block">Voice (TTS) Model</label>
-                <select
-                  value={promptConfig.selectedTtsModel || 'auto'}
-                  onChange={e => handleModelChange('selectedTtsModel', e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
-                >
-                  <option value="auto">Auto (recommended)</option>
-                  {ttsModelOptions.map(m => (
-                    <option key={m.name} value={m.name}>{m.label}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="text-[11px] text-slate-300 mb-1 block">Text & Vision Model</label>
+              <select
+                value={promptConfig.selectedModel || 'auto'}
+                onChange={e => handleModelChange('selectedModel', e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+              >
+                <option value="auto">Auto (recommended)</option>
+                {textModelOptions.map(m => (
+                  <option key={m.name} value={m.name}>{m.label}</option>
+                ))}
+              </select>
             </div>
 
             <p className="text-[11px] text-slate-400 leading-normal">
-              Free tier: use a Flash or Flash-Lite model. Pro models may be paid-only. Auto picks the best working Flash model.
+              Free tier: use a Flash model. Pro models may require paid API quotas. Auto selects the fastest available model.
             </p>
           </div>
         </div>

@@ -19,7 +19,6 @@ export function OnboardingModal() {
 
   const [promptConfig, setPromptConfig] = useState<PromptConfig>(() => SystemPromptsService.getConfig());
   const [textModelOptions, setTextModelOptions] = useState<FormattedModelOption[]>([]);
-  const [ttsModelOptions, setTtsModelOptions] = useState<FormattedModelOption[]>([]);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
 
   useEffect(() => {
@@ -33,9 +32,8 @@ export function OnboardingModal() {
     setIsRefreshingModels(true);
     try {
       if (force) invalidateModelCache();
-      const { textModels, ttsModels } = await getFilteredModelLists(force);
+      const { textModels } = await getFilteredModelLists(force);
       setTextModelOptions(textModels);
-      setTtsModelOptions(ttsModels);
     } catch (err) {
       console.warn('Failed to load dynamic model list in onboarding:', err);
     } finally {
@@ -63,7 +61,7 @@ export function OnboardingModal() {
     }
   };
 
-  const handleModelChange = (key: 'selectedModel' | 'selectedTtsModel', val: string) => {
+  const handleModelChange = (key: 'selectedModel', val: string) => {
     triggerHaptic('light');
     const updated = { ...promptConfig, [key]: val };
     setPromptConfig(updated);
@@ -184,7 +182,7 @@ export function OnboardingModal() {
               </h2>
 
               <p className="text-xs text-slate-300 leading-relaxed">
-                Reelix uses Gemini Flash models to structure viral edit plans, analyze video clips, and synthesize voiceovers. Keys are saved strictly in your local device storage.
+                Reelix uses Gemini Flash models to structure viral edit plans, analyze video clips, and transcribe speech. Keys are saved strictly in your local device storage.
               </p>
 
               <div className="space-y-2 pt-2">
@@ -254,38 +252,22 @@ export function OnboardingModal() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-1 block">Text Model</label>
-                    <select
-                      value={promptConfig.selectedModel || 'auto'}
-                      onChange={e => handleModelChange('selectedModel', e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
-                    >
-                      <option value="auto">Auto (recommended)</option>
-                      {textModelOptions.map(m => (
-                        <option key={m.name} value={m.name}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 mb-1 block">Voice (TTS) Model</label>
-                    <select
-                      value={promptConfig.selectedTtsModel || 'auto'}
-                      onChange={e => handleModelChange('selectedTtsModel', e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
-                    >
-                      <option value="auto">Auto (recommended)</option>
-                      {ttsModelOptions.map(m => (
-                        <option key={m.name} value={m.name}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 mb-1 block">AI Text & Vision Model</label>
+                  <select
+                    value={promptConfig.selectedModel || 'auto'}
+                    onChange={e => handleModelChange('selectedModel', e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:border-violet-500 focus:outline-none"
+                  >
+                    <option value="auto">Auto (recommended)</option>
+                    {textModelOptions.map(m => (
+                      <option key={m.name} value={m.name}>{m.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <p className="text-[10px] text-slate-400 leading-tight">
-                  Free tier: use a Flash or Flash-Lite model. Pro models may be paid-only. Auto picks the best working Flash model.
+                  Free tier: use a Flash model. Auto selects the optimal available Flash model.
                 </p>
               </div>
 

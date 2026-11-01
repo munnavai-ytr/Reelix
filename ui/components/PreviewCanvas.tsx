@@ -17,6 +17,7 @@ export function PreviewCanvas() {
     isPlaying,
     setIsPlaying,
     assets,
+    assetVersion,
   } = useStudioStore();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -55,7 +56,7 @@ export function PreviewCanvas() {
 
     renderFrame(ctx, currentPlan, t, previewWidth, previewHeight, assets);
     syncPreviewVideos(currentPlan, t, assets, isPlaying);
-  }, [currentPlan, previewWidth, previewHeight, assets, isPlaying]);
+  }, [currentPlan, previewWidth, previewHeight, assets, isPlaying, assetVersion]);
 
   // Main playback animation loop
   useEffect(() => {
@@ -63,6 +64,11 @@ export function PreviewCanvas() {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       audioMixerRef.current?.stopAll();
       return;
+    }
+
+    // Start audio mixer once when playback begins
+    if (!isMuted && audioMixerRef.current) {
+      audioMixerRef.current.play(currentPlan, currentTime).catch(() => {});
     }
 
     lastTimeRef.current = performance.now();
@@ -84,10 +90,6 @@ export function PreviewCanvas() {
       setCurrentTime(nextTime);
       drawCurrentFrame(nextTime);
 
-      if (!isMuted && audioMixerRef.current) {
-        audioMixerRef.current.syncPlayback(currentPlan, nextTime);
-      }
-
       animFrameRef.current = requestAnimationFrame(loop);
     };
 
@@ -95,6 +97,7 @@ export function PreviewCanvas() {
 
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      audioMixerRef.current?.stopAll();
     };
   }, [isPlaying, currentPlan, isMuted, drawCurrentFrame, setCurrentTime, setIsPlaying]);
 
@@ -102,7 +105,7 @@ export function PreviewCanvas() {
     if (!isPlaying) {
       drawCurrentFrame(currentTime);
     }
-  }, [currentTime, isPlaying, drawCurrentFrame]);
+  }, [currentTime, isPlaying, drawCurrentFrame, assetVersion]);
 
   const togglePlay = () => {
     triggerHaptic('light');
@@ -117,6 +120,9 @@ export function PreviewCanvas() {
     const newT = parseFloat(e.target.value);
     setCurrentTime(newT);
     drawCurrentFrame(newT);
+    if (isPlaying && !isMuted && audioMixerRef.current && currentPlan) {
+      audioMixerRef.current.play(currentPlan, newT).catch(() => {});
+    }
   };
 
   const formatTime = (sec: number) => {
@@ -153,7 +159,15 @@ export function PreviewCanvas() {
             {proxyResolution === 'proxy' ? '540p Proxy' : '1080p FHD'}
           </button>
           <button
-            onClick={() => setIsMuted(!isMuted)}
+            onClick={() => {
+              const nextMuted = !isMuted;
+              setIsMuted(nextMuted);
+              if (nextMuted) {
+                audioMixerRef.current?.stopAll();
+              } else if (isPlaying && currentPlan) {
+                audioMixerRef.current?.play(currentPlan, currentTime).catch(() => {});
+              }
+            }}
             className="p-1 rounded-lg text-slate-400 hover:text-white"
           >
             {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
@@ -205,6 +219,9 @@ export function PreviewCanvas() {
                 triggerHaptic('light');
                 setCurrentTime(0);
                 drawCurrentFrame(0);
+                if (isPlaying && currentPlan && !isMuted) {
+                  audioMixerRef.current?.play(currentPlan, 0).catch(() => {});
+                }
               }}
               className="p-2 rounded-xl text-slate-400 hover:text-white transition-colors"
             >

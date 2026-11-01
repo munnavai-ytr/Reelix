@@ -1,12 +1,11 @@
-// Gemini REST Client with dynamic model discovery, backoff retries, JSON schemas, and real TTS
+// Gemini REST Client with dynamic model discovery, backoff retries, and JSON schemas
 import { ApiKeysService } from '../storage/keys';
 import { SystemPromptsService } from '../storage/system-prompts';
 import { nativeFetch } from './http';
-import { resolveTextModel, resolveTtsModel, invalidateModelCache } from './models';
+import { resolveTextModel, invalidateModelCache } from './models';
 
 export interface GeminiCallOptions {
   model?: string;
-  kind?: 'text' | 'tts';
   maxRetries?: number;
 }
 
@@ -47,18 +46,17 @@ export async function callGeminiRaw(
     throw new Error('Gemini API key is missing. Please enter your API key in Settings.');
   }
 
-  const kind = options.kind || 'text';
   const maxRetries = options.maxRetries ?? 3;
   let model = options.model;
 
   if (!model || model === 'auto') {
-    model = kind === 'tts' ? await resolveTtsModel() : await resolveTextModel();
+    model = await resolveTextModel();
   }
 
-  // --- SAFETY NET FOR REST API PAYLOAD ---
+  // --- Strict REST Body Formatting: only generationConfig & systemInstruction ---
   const cleanedPayload: Record<string, unknown> = { ...payload };
 
-  // 1. Move 'config' -> 'generationConfig'
+  // Move config -> generationConfig
   if ('config' in cleanedPayload && cleanedPayload.config && typeof cleanedPayload.config === 'object') {
     const cfg = cleanedPayload.config as Record<string, unknown>;
     const existingGen = (cleanedPayload.generationConfig as Record<string, unknown>) || {};
@@ -66,7 +64,7 @@ export async function callGeminiRaw(
     delete cleanedPayload.config;
   }
 
-  // 2. Normalize systemInstruction to top-level { systemInstruction: { parts: [{ text: ... }] } }
+  // Normalize systemInstruction to top-level { systemInstruction: { parts: [{ text: ... }] } }
   let sysText: string | undefined = undefined;
   if ('system_instruction' in cleanedPayload && cleanedPayload.system_instruction) {
     const sys = cleanedPayload.system_instruction;
@@ -88,7 +86,7 @@ export async function callGeminiRaw(
     };
   }
 
-  // 3. Move top-level temperature / responseSchema / responseMimeType inside generationConfig
+  // Move top-level temperature / responseSchema / responseMimeType inside generationConfig
   const genConfig = (cleanedPayload.generationConfig as Record<string, unknown>) || {};
   if ('temperature' in cleanedPayload) {
     genConfig.temperature = cleanedPayload.temperature;
@@ -124,20 +122,16 @@ export async function callGeminiRaw(
 
       const errMsg = res.data?.error?.message || '';
 
-      // Handle 404 / 403 / "no longer available" -> Reset user's choice to 'auto' & retry
+      // Handle 404 / 403 / "no longer available" -> Reset selection to 'auto' & retry
       if ((res.status === 404 || res.status === 403 || errMsg.toLowerCase().includes('no longer available')) && !resetAttempted) {
         resetAttempted = true;
         console.warn(`Model ${model} returned ${res.status} ("${errMsg}"). Resetting selection to 'auto' and retrying once.`);
         const sysCfg = SystemPromptsService.getConfig();
-        if (kind === 'tts') {
-          sysCfg.selectedTtsModel = 'auto';
-        } else {
-          sysCfg.selectedModel = 'auto';
-        }
+        sysCfg.selectedModel = 'auto';
         SystemPromptsService.saveConfig(sysCfg);
         invalidateModelCache();
 
-        model = kind === 'tts' ? await resolveTtsModel(true) : await resolveTextModel(undefined, true);
+        model = await resolveTextModel(undefined, true);
         await sleep(500);
         continue;
       }
@@ -174,29 +168,69 @@ export async function callGeminiRaw(
   throw new Error('Gemini request failed after retries.');
 }
 
+export interface GeminiJsonOptions {
+  schema?: Record<string, unknown>;
+  temperature?: number;
+  systemInstruction?: string;
+  model?: string;
+  maxRetries?: number;
+}
+
 export async function callGeminiJson<T = unknown>(
-  payload: Record<string, unknown>,
-  schema?: Record<string, unknown>,
-  options: GeminiCallOptions = {}
+  payloadOrParts: Record<string, unknown> | Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>,
+  optionsOrSchema?: GeminiJsonOptions | Record<string, unknown>,
+  legacyOptions?: GeminiCallOptions
 ): Promise<T> {
-  const existingGen = (payload.generationConfig as Record<string, unknown>) || {};
-  const { config: _drop, ...rest } = payload;
+  let schema: Record<string, unknown> | undefined;
+  let temperature: number | undefined;
+  let systemInstruction: string | undefined;
+  let model: string | undefined;
+  let maxRetries: number | undefined;
 
-  const newGenConfig: Record<string, unknown> = {
-    ...existingGen,
-    responseMimeType: 'application/json',
-  };
-
-  if (schema) {
-    newGenConfig.responseSchema = schema;
+  // Normalize signature: callGeminiJson(parts, { schema, temperature, systemInstruction }) vs legacy callGeminiJson(payload, schema, options)
+  if (optionsOrSchema && typeof optionsOrSchema === 'object' && ('schema' in optionsOrSchema || 'systemInstruction' in optionsOrSchema || 'temperature' in optionsOrSchema)) {
+    const opts = optionsOrSchema as GeminiJsonOptions;
+    schema = opts.schema;
+    temperature = opts.temperature;
+    systemInstruction = opts.systemInstruction;
+    model = opts.model;
+    maxRetries = opts.maxRetries;
+  } else {
+    schema = optionsOrSchema as Record<string, unknown> | undefined;
+    model = legacyOptions?.model;
+    maxRetries = legacyOptions?.maxRetries;
   }
 
-  const finalPayload = {
-    ...rest,
-    generationConfig: newGenConfig,
+  let finalPayload: Record<string, unknown>;
+
+  if (Array.isArray(payloadOrParts)) {
+    finalPayload = {
+      contents: [
+        {
+          role: 'user',
+          parts: payloadOrParts,
+        },
+      ],
+    };
+  } else {
+    finalPayload = { ...payloadOrParts };
+  }
+
+  const genConfig: Record<string, unknown> = {
+    responseMimeType: 'application/json',
+    ...(schema ? { responseSchema: schema } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
   };
 
-  const res = await callGeminiRaw(finalPayload, options);
+  finalPayload.generationConfig = genConfig;
+
+  if (systemInstruction) {
+    finalPayload.systemInstruction = {
+      parts: [{ text: systemInstruction }],
+    };
+  }
+
+  const res = await callGeminiRaw(finalPayload, { model, maxRetries });
   const text = res.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!text) {
@@ -219,159 +253,6 @@ export async function callGeminiJson<T = unknown>(
   }
 }
 
-// Split text into chunks <= 1800 characters split on sentence boundaries
-function splitTextIntoSentences(text: string, maxLen = 1800): string[] {
-  if (text.length <= maxLen) return [text];
-  
-  const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
-  const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxLen) {
-      if (currentChunk.trim()) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = sentence;
-    } else {
-      currentChunk += sentence;
-    }
-  }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks.length > 0 ? chunks : [text];
-}
-
-export interface TtsResult {
-  audioUrl: string;
-  audioBlob: Blob;
-  durationSec: number;
-}
-
-export async function generateGeminiTtsAudio(
-  text: string,
-  voiceName: string = 'Puck'
-): Promise<TtsResult> {
-  if (!text || !text.trim()) {
-    throw new Error('Speech text cannot be empty');
-  }
-
-  const chunks = splitTextIntoSentences(text.trim());
-  const pcmBuffers: Uint8Array[] = [];
-
-  for (const chunk of chunks) {
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: chunk }],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
-          },
-        },
-      },
-    };
-
-    const res = await callGeminiRaw(payload, { kind: 'tts' });
-    const part = res.candidates?.[0]?.content?.parts?.[0];
-    const base64Data = part?.inlineData?.data;
-
-    if (!base64Data) {
-      throw new Error('Gemini TTS failed to generate audio output for sentence block.');
-    }
-
-    const binaryStr = atob(base64Data);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    // Gemini unary audio/wav contains a 44-byte WAV header followed by 16-bit 24kHz PCM
-    let pcmData: Uint8Array;
-    if (bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49) {
-      // Valid RIFF header - strip the 44-byte header
-      pcmData = bytes.subarray(44);
-    } else {
-      pcmData = bytes;
-    }
-
-    pcmBuffers.push(pcmData);
-  }
-
-  // Combine all raw PCM buffers
-  let totalPcmBytes = 0;
-  for (const buf of pcmBuffers) {
-    totalPcmBytes += buf.length;
-  }
-
-  const combinedPcm = new Uint8Array(totalPcmBytes);
-  let offset = 0;
-  for (const buf of pcmBuffers) {
-    combinedPcm.set(buf, offset);
-    offset += buf.length;
-  }
-
-  // Build a standard 44-byte WAV header for 24000 Hz 16-bit mono PCM
-  const sampleRate = 24000;
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
-  const blockAlign = numChannels * (bitsPerSample / 8);
-  const dataSize = combinedPcm.length;
-  const chunkSize = 36 + dataSize;
-
-  const wavHeader = new ArrayBuffer(44);
-  const view = new DataView(wavHeader);
-
-  // RIFF identifier
-  view.setUint32(0, 0x52494646, false); // "RIFF"
-  view.setUint32(4, chunkSize, true);
-  view.setUint32(8, 0x57415645, false); // "WAVE"
-  // fmt subchunk
-  view.setUint32(12, 0x666d7420, false); // "fmt "
-  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-  view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-  // data subchunk
-  view.setUint32(36, 0x64617461, false); // "data"
-  view.setUint32(40, dataSize, true);
-
-  const fullWavBytes = new Uint8Array(44 + dataSize);
-  fullWavBytes.set(new Uint8Array(wavHeader), 0);
-  fullWavBytes.set(combinedPcm, 44);
-
-  const audioBlob = new Blob([fullWavBytes], { type: 'audio/wav' });
-  const audioUrl = URL.createObjectURL(audioBlob);
-
-  // Decode audio buffer to measure true decoded duration
-  let durationSec = (dataSize / 2) / sampleRate;
-  if (typeof window !== 'undefined' && (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)) {
-    try {
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const arrayBuf = await audioBlob.arrayBuffer();
-      const decodedBuf = await audioCtx.decodeAudioData(arrayBuf);
-      durationSec = decodedBuf.duration;
-      await audioCtx.close();
-    } catch (err) {
-      console.warn('AudioContext decoding notice:', err);
-    }
-  }
-
-  return { audioUrl, audioBlob, durationSec };
-}
-
 // Compat object wrapper
 export const GeminiClient = {
   callWithRetry: async <T = unknown>(payload: Record<string, unknown>, model?: string, maxRetries?: number): Promise<T> => {
@@ -379,9 +260,5 @@ export const GeminiClient = {
     const text = res.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Gemini returned an empty response.');
     return text as unknown as T;
-  },
-  synthesizeSpeech: async (text: string, voiceName: string = 'Puck'): Promise<Blob> => {
-    const result = await generateGeminiTtsAudio(text, voiceName);
-    return result.audioBlob;
   },
 };

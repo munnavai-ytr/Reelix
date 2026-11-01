@@ -19,7 +19,6 @@ import { ProjectList } from '@/ui/components/ProjectList';
 import { LibraryTab } from '@/ui/components/LibraryTab';
 import { AiCreatorStudio } from '@/ui/components/AiCreatorStudio';
 import { ChatToChangePanel } from '@/ui/components/ChatToChangePanel';
-import { MagicFeaturesModal } from '@/ui/components/MagicFeaturesModal';
 import { Sparkles, Film, ArrowRight, MessageSquare, Zap, Shield, Database, Wand2 } from 'lucide-react';
 import Link from 'next/link';
 import { triggerHaptic } from '@/storage/haptics';
@@ -33,7 +32,6 @@ export default function StudioPage() {
   } = useStudioStore();
 
   const [showChatPanel, setShowChatPanel] = useState(false);
-  const [showMagicModal, setShowMagicModal] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#0B0B0F] text-slate-100 flex flex-col overflow-x-hidden selection:bg-violet-500/30 selection:text-white">
@@ -48,15 +46,6 @@ export default function StudioPage() {
 
       {/* Real WebCodecs MP4 Export Modal */}
       <ExportModal />
-
-      {/* Magic Features Modal (Vibe Slider, Remix x3, Hook Lab, Beat Sync, Themes) */}
-      <MagicFeaturesModal
-        isOpen={showMagicModal}
-        onClose={() => setShowMagicModal(false)}
-        onTriggerMagicGenerate={() => {
-          setActiveTab('create');
-        }}
-      />
 
       {/* Top Header */}
       <Header />
@@ -100,17 +89,6 @@ export default function StudioPage() {
                     >
                       <Sparkles className="w-4 h-4 text-cyan-200" />
                       <span>Create New Short</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        triggerHaptic('light');
-                        setShowMagicModal(true);
-                      }}
-                      className="px-5 py-3.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-semibold text-sm flex items-center gap-2 transition-colors"
-                    >
-                      <Zap className="w-4 h-4 text-cyan-400" />
-                      <span>Magic Studio</span>
                     </button>
 
                     {currentPlan && (
@@ -203,14 +181,6 @@ export default function StudioPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowMagicModal(true)}
-                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 text-xs font-bold text-white flex items-center gap-1.5 shadow-md shadow-violet-500/20 transition-all"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>Magic Studio</span>
-                      </button>
-
                       <button
                         onClick={() => setShowChatPanel(!showChatPanel)}
                         className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors ${

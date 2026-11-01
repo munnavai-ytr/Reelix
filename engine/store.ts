@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { EditPlan, Layer, VideoLayer } from './types';
 import { AssetCache } from './renderer';
+import { ensureAssets } from './media';
 import { PipelineProgressEvent } from '../pipeline/types';
 import { ExportProgress } from '../pipeline/exporter';
 import { ProjectDb } from '../storage/db';
@@ -14,6 +15,7 @@ export interface StudioState {
   selectedLayerId: string | null;
   activeTab: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'admin';
   assets: AssetCache;
+  assetVersion: number;
   history: EditPlan[];
   future: EditPlan[];
   pipelineProgress: PipelineProgressEvent | null;
@@ -59,6 +61,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     videos: new Map(),
     images: new Map(),
   },
+  assetVersion: 0,
   history: [],
   future: [],
   pipelineProgress: null,
@@ -77,20 +80,35 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
       selectedLayerId: plan.layers[0]?.id || null,
     });
+
+    ensureAssets(plan, get().assets, () => {
+      set({ assetVersion: get().assetVersion + 1 });
+    }).then((updated) => {
+      set({ assets: updated, assetVersion: get().assetVersion + 1 });
+    });
   },
 
   applyPlan: (plan) => {
-    const { currentPlan, history } = get();
+    const { currentPlan, history, currentTime } = get();
     const nextHistory = currentPlan ? [...history, currentPlan].slice(-25) : history;
+    const clampedTime = Math.max(0, Math.min(plan.duration, currentTime));
+
     set({
       currentPlan: plan,
+      currentTime: clampedTime,
       history: nextHistory,
       future: [],
       selectedLayerId: plan.layers[0]?.id || null,
     });
+
+    ensureAssets(plan, get().assets, () => {
+      set({ assetVersion: get().assetVersion + 1 });
+    }).then((updated) => {
+      set({ assets: updated, assetVersion: get().assetVersion + 1 });
+    });
   },
 
-  setAssets: (assets) => set({ assets }),
+  setAssets: (assets) => set({ assets, assetVersion: get().assetVersion + 1 }),
 
   setCurrentTime: (time) => {
     const plan = get().currentPlan;

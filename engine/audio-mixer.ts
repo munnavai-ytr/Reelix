@@ -1,6 +1,7 @@
 // Web Audio API Graph with Auto-Ducking and Loudness Normalization
 import { EditPlan, AudioLayer } from './types';
-import { isLayerActive, computeAudioDuckingVolume } from './timeline';
+import { computeAudioDuckingVolume } from './timeline';
+import { resolveSrc } from './media';
 
 export class AudioMixer {
   private ctx: AudioContext | null = null;
@@ -9,8 +10,15 @@ export class AudioMixer {
   private isPlaying = false;
 
   async init(): Promise<void> {
-    if (this.ctx) return;
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
+      return;
+    }
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AudioContextClass();
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
@@ -18,6 +26,7 @@ export class AudioMixer {
   }
 
   async loadAudio(url: string): Promise<AudioBuffer | null> {
+    if (!url) return null;
     if (this.audioBuffers.has(url)) {
       return this.audioBuffers.get(url)!;
     }
@@ -25,65 +34,80 @@ export class AudioMixer {
     if (!this.ctx) return null;
 
     try {
-      const response = await fetch(url);
+      const resolved = await resolveSrc(url);
+      if (!resolved) return null;
+      const response = await fetch(resolved);
       const arrayBuffer = await response.arrayBuffer();
       const decoded = await this.ctx.decodeAudioData(arrayBuffer);
       this.audioBuffers.set(url, decoded);
+      if (resolved !== url) {
+        this.audioBuffers.set(resolved, decoded);
+      }
       return decoded;
-    } catch {
+    } catch (err) {
+      console.warn('AudioMixer loadAudio error:', url, err);
       return null;
     }
   }
 
-  syncPlayback(plan: EditPlan, currentTime: number): void {
-    if (!this.ctx || this.ctx.state === 'suspended') return;
+  async play(plan: EditPlan, fromTime: number): Promise<void> {
+    await this.init();
+    if (!this.ctx) return;
+    this.stopAll();
+    this.isPlaying = true;
 
-    // Filter audio layers
-    const audioLayers = plan.layers.filter(l => l.type === 'audio') as AudioLayer[];
+    const audioLayers = plan.layers.filter(
+      (l) => l.type === 'audio' && (l as AudioLayer).src
+    ) as AudioLayer[];
+
+    const baseCtxTime = this.ctx.currentTime;
 
     for (const layer of audioLayers) {
-      const isActive = isLayerActive(layer, currentTime);
-      const buffer = this.audioBuffers.get(layer.src);
+      const layerEnd = layer.startTime + layer.duration;
+      if (layerEnd <= fromTime) continue;
 
-      if (isActive && buffer && !this.activeNodes.has(layer.id)) {
-        // Start node at correct offset
-        const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
-        const gain = this.ctx.createGain();
+      let buffer = this.audioBuffers.get(layer.src);
+      if (!buffer) {
+        buffer = await this.loadAudio(layer.src);
+      }
+      if (!buffer) continue;
 
-        const currentVol = computeAudioDuckingVolume(layer, currentTime, plan.layers);
-        gain.gain.setValueAtTime(currentVol, this.ctx.currentTime);
+      const delaySec = Math.max(0, layer.startTime - fromTime);
+      const startCtxTime = baseCtxTime + delaySec;
 
-        source.connect(gain);
-        gain.connect(this.ctx.destination);
+      const offsetInLayer = Math.max(0, fromTime - layer.startTime) + (layer.trimIn ?? 0);
+      const durationLeft = Math.max(0.05, layer.duration - Math.max(0, fromTime - layer.startTime));
 
-        const layerOffset = currentTime - layer.startTime + (layer.trimIn ?? 0);
-        const durationLeft = Math.max(0.1, layer.duration - (currentTime - layer.startTime));
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
 
-        source.start(0, Math.max(0, layerOffset), durationLeft);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, startCtxTime);
+
+      // Automate ducking volume
+      const steps = Math.min(200, Math.ceil(durationLeft / 0.1));
+      for (let s = 0; s <= steps; s++) {
+        const checkTime = fromTime + delaySec + s * 0.1;
+        const targetVol = computeAudioDuckingVolume(layer, checkTime, plan.layers);
+        const rampTime = startCtxTime + s * 0.1;
+        if (s === 0) {
+          gain.gain.setValueAtTime(Math.max(0.001, targetVol), rampTime);
+        } else {
+          gain.gain.linearRampToValueAtTime(Math.max(0.001, targetVol), rampTime);
+        }
+      }
+
+      source.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      try {
+        source.start(startCtxTime, offsetInLayer, durationLeft);
         this.activeNodes.set(layer.id, { source, gain });
-
         source.onended = () => {
           this.activeNodes.delete(layer.id);
         };
-      } else if (this.activeNodes.has(layer.id)) {
-        if (!isActive) {
-          // Stop node
-          const node = this.activeNodes.get(layer.id);
-          try {
-            node?.source.stop();
-          } catch {
-            // ignore
-          }
-          this.activeNodes.delete(layer.id);
-        } else {
-          // Adjust volume dynamically
-          const node = this.activeNodes.get(layer.id);
-          if (node) {
-            const currentVol = computeAudioDuckingVolume(layer, currentTime, plan.layers);
-            node.gain.gain.setTargetAtTime(currentVol, this.ctx.currentTime, 0.05);
-          }
-        }
+      } catch (e) {
+        console.warn('Failed to start audio source:', layer.id, e);
       }
     }
   }
@@ -92,55 +116,13 @@ export class AudioMixer {
     for (const [, node] of this.activeNodes) {
       try {
         node.source.stop();
+        node.source.disconnect();
+        node.gain.disconnect();
       } catch {
         // ignore
       }
     }
     this.activeNodes.clear();
     this.isPlaying = false;
-  }
-
-  // Synthesize procedural SFX if no external audio is available
-  async generateProceduralSfx(type: 'whoosh' | 'pop' | 'hit' | 'ding'): Promise<AudioBuffer | null> {
-    await this.init();
-    if (!this.ctx) return null;
-
-    const sampleRate = this.ctx.sampleRate;
-    let duration = 0.3;
-    if (type === 'whoosh') duration = 0.45;
-    if (type === 'hit') duration = 0.6;
-    if (type === 'ding') duration = 0.8;
-
-    const buffer = this.ctx.createBuffer(2, sampleRate * duration, sampleRate);
-    const channel0 = buffer.getChannelData(0);
-    const channel1 = buffer.getChannelData(1);
-
-    for (let i = 0; i < buffer.length; i++) {
-      const t = i / sampleRate;
-      let sample = 0;
-
-      if (type === 'whoosh') {
-        const whiteNoise = (Math.random() * 2 - 1);
-        const envelope = Math.sin((t / duration) * Math.PI);
-        sample = whiteNoise * envelope * 0.4;
-      } else if (type === 'pop') {
-        const freq = 450 - (t / duration) * 350;
-        const envelope = Math.exp(-t * 22);
-        sample = Math.sin(2 * Math.PI * freq * t) * envelope * 0.6;
-      } else if (type === 'hit') {
-        const subFreq = 80 * Math.exp(-t * 8);
-        const sub = Math.sin(2 * Math.PI * subFreq * t);
-        const noise = (Math.random() * 2 - 1) * Math.exp(-t * 15) * 0.5;
-        sample = (sub * 0.7 + noise) * Math.exp(-t * 4);
-      } else if (type === 'ding') {
-        const bell = Math.sin(2 * Math.PI * 1760 * t) + 0.4 * Math.sin(2 * Math.PI * 3520 * t);
-        sample = bell * Math.exp(-t * 4) * 0.5;
-      }
-
-      channel0[i] = sample;
-      channel1[i] = sample;
-    }
-
-    return buffer;
   }
 }

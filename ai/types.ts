@@ -1,5 +1,6 @@
 // AI Provider Interface and Options for Reelix
 import { EditPlan } from '../engine/types';
+import { VideoAnalysisResult } from './clip-analysis';
 
 export interface DirectorRequest {
   script?: string;
@@ -7,6 +8,8 @@ export interface DirectorRequest {
   voiceDuration: number;
   userVideoUrls?: string[];
   userImageUrls?: string[];
+  clipAnalysis?: VideoAnalysisResult;
+  mode?: 'broll' | 'talking-head';
   niche?: string;
   style?: string;
   targetDuration?: number;
@@ -22,12 +25,6 @@ export interface DirectorResult {
   sfxQueries: string[];
   directorNotes: string;
   notices?: string[];
-}
-
-export interface TtsOptions {
-  text: string;
-  voiceName?: string; // Puck, Charon, Kore, Fenrir, Aoede
-  language?: string;
 }
 
 export interface TranscriptionWord {

@@ -4,7 +4,7 @@ import { isLegacyModel } from '../ai/models';
 export interface LogEntry {
   id: string;
   timestamp: number;
-  service: 'director' | 'chat-to-change' | 'ai-creator' | 'tts' | 'audio-bpm';
+  service: 'director' | 'chat-to-change' | 'ai-creator' | 'whisper' | 'clip-analysis' | 'audio-bpm';
   model: string;
   durationMs: number;
   status: 'success' | 'error';
@@ -14,7 +14,6 @@ export interface LogEntry {
 
 export interface PromptConfig {
   selectedModel: string;
-  selectedTtsModel: string;
   directorPrompt: string;
   chatPrompt: string;
   creatorPrompt: string;
@@ -25,8 +24,8 @@ Generate an Edit Plan JSON strictly adhering to schema.
 Rules:
 1. Fast-paced hook in the first 3 seconds with a dramatic zoom, punch, or shake.
 2. Word-by-word synchronized captions with vibrant styling.
-3. Engaging B-roll or motion backgrounds with smooth transitions (whip-pan, zoom-in, glitch).
-4. SFX hits on key reveal moments and ducked background music.`;
+3. Engaging B-roll cuts and media pacing aligned to speech.
+4. Auto-ducked sound effects and background music.`;
 
 export const DEFAULT_CHAT_PROMPT = `You are Reelix Chat-to-Change Editor AI.
 The user wants to modify their vertical Short Edit Plan.
@@ -42,15 +41,14 @@ Your role is to generate declarative definitions for video assets:
 - SVG graphic stickers
 - Full viral Short templates`;
 
-const PROMPT_CONFIG_KEY = 'reelix_prompts_config_v1';
-const LOGS_STORAGE_KEY = 'reelix_ai_logs_v1';
+const PROMPT_CONFIG_KEY = 'reelix_prompts_config_v2';
+const LOGS_STORAGE_KEY = 'reelix_ai_logs_v2';
 
 export class SystemPromptsService {
   static getConfig(): PromptConfig {
     if (typeof window === 'undefined') {
       return {
         selectedModel: 'auto',
-        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
@@ -60,22 +58,18 @@ export class SystemPromptsService {
     if (!raw) {
       return {
         selectedModel: 'auto',
-        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,
       };
     }
     try {
+      const parsed = JSON.parse(raw);
       if (!parsed.selectedModel || isLegacyModel(parsed.selectedModel)) {
         parsed.selectedModel = 'auto';
       }
-      if (!parsed.selectedTtsModel || isLegacyModel(parsed.selectedTtsModel)) {
-        parsed.selectedTtsModel = 'auto';
-      }
       return {
         selectedModel: parsed.selectedModel || 'auto',
-        selectedTtsModel: parsed.selectedTtsModel || 'auto',
         directorPrompt: parsed.directorPrompt || DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: parsed.chatPrompt || DEFAULT_CHAT_PROMPT,
         creatorPrompt: parsed.creatorPrompt || DEFAULT_CREATOR_PROMPT,
@@ -83,7 +77,6 @@ export class SystemPromptsService {
     } catch {
       return {
         selectedModel: 'auto',
-        selectedTtsModel: 'auto',
         directorPrompt: DEFAULT_DIRECTOR_PROMPT,
         chatPrompt: DEFAULT_CHAT_PROMPT,
         creatorPrompt: DEFAULT_CREATOR_PROMPT,

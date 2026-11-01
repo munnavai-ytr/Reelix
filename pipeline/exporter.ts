@@ -1,9 +1,9 @@
-// Robust WebCodecs + mp4-muxer Exporter with Codec Probing, Backpressure, Audio Mixdown, and Presets
+// Robust WebCodecs + mp4-muxer Exporter with Codec Probing, Audio Track Encoding, Backpressure, and Presets
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { EditPlan, AudioLayer } from '../engine/types';
 import { renderFrame, AssetCache } from '../engine/renderer';
 import { computeAudioDuckingVolume } from '../engine/timeline';
-import { resolveSrc } from '../engine/media';
+import { resolveSrc, seekVideosForExport } from '../engine/media';
 
 export interface ExportProgress {
   percentage: number;
@@ -79,7 +79,7 @@ async function probeBestSupportedVideoCodec(width: number, height: number, fps: 
 }
 
 async function mixOfflineAudio(plan: EditPlan, sampleRate = 48000): Promise<AudioBuffer | null> {
-  const audioLayers = plan.layers.filter(l => l.type === 'audio' && l.src) as AudioLayer[];
+  const audioLayers = plan.layers.filter(l => l.type === 'audio' && (l as AudioLayer).src) as AudioLayer[];
   if (audioLayers.length === 0) return null;
 
   const totalLengthSamples = Math.ceil(plan.duration * sampleRate);
@@ -158,6 +158,22 @@ async function exportViaWebCodecs(
 
   const mixedAudioBuffer = await mixOfflineAudio(plan, 48000);
 
+  // Check if AudioEncoder is available and AAC is supported
+  let canEncodeAudio = false;
+  if (mixedAudioBuffer && typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined') {
+    try {
+      const audioSupport = await AudioEncoder.isConfigSupported({
+        codec: 'mp4a.40.2',
+        numberOfChannels: 2,
+        sampleRate: 48000,
+        bitrate: 128000,
+      });
+      canEncodeAudio = !!audioSupport.supported;
+    } catch {
+      canEncodeAudio = false;
+    }
+  }
+
   const muxer = new Muxer({
     target,
     video: {
@@ -165,15 +181,62 @@ async function exportViaWebCodecs(
       width,
       height,
     },
-    ...(mixedAudioBuffer ? {
-      audio: {
-        codec: 'aac',
-        numberOfChannels: 2,
-        sampleRate: 48000,
-      }
-    } : {}),
+    ...(canEncodeAudio
+      ? {
+          audio: {
+            codec: 'aac',
+            numberOfChannels: 2,
+            sampleRate: 48000,
+          },
+        }
+      : {}),
     fastStart: 'in-memory',
   });
+
+  // Setup Audio Encoder if audio track is active
+  let audioEncoder: AudioEncoder | null = null;
+  if (canEncodeAudio && mixedAudioBuffer) {
+    audioEncoder = new AudioEncoder({
+      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      error: (e) => console.warn('AudioEncoder error:', e),
+    });
+    audioEncoder.configure({
+      codec: 'mp4a.40.2',
+      numberOfChannels: 2,
+      sampleRate: 48000,
+      bitrate: 128000,
+    });
+
+    // Encode audio chunks (1024 frames per chunk)
+    const sampleRate = 48000;
+    const totalSamples = mixedAudioBuffer.length;
+    const chunkSize = 1024;
+    const left = mixedAudioBuffer.getChannelData(0);
+    const right = mixedAudioBuffer.numberOfChannels > 1 ? mixedAudioBuffer.getChannelData(1) : left;
+
+    for (let offset = 0; offset < totalSamples; offset += chunkSize) {
+      const currentChunkSize = Math.min(chunkSize, totalSamples - offset);
+      const chunkData = new Float32Array(currentChunkSize * 2);
+      for (let i = 0; i < currentChunkSize; i++) {
+        chunkData[i] = left[offset + i];
+        chunkData[currentChunkSize + i] = right[offset + i];
+      }
+      const timestamp = Math.round((offset / sampleRate) * 1_000_000);
+      const audioData = new AudioData({
+        format: 'f32-planar',
+        sampleRate,
+        numberOfFrames: currentChunkSize,
+        numberOfChannels: 2,
+        timestamp,
+        data: chunkData,
+      });
+      audioEncoder.encode(audioData);
+      audioData.close();
+    }
+
+    await audioEncoder.flush();
+    audioEncoder.close();
+  }
 
   let encoderError: Error | null = null;
   const videoEncoder = new VideoEncoder({
@@ -198,11 +261,16 @@ async function exportViaWebCodecs(
     }
 
     // Handle encoder backpressure to prevent memory exhaustion and hanging
-    while (videoEncoder.encodeQueueSize > 8) {
-      await new Promise(r => setTimeout(r, 20));
+    while (videoEncoder.encodeQueueSize > 6) {
+      await new Promise((r) => setTimeout(r, 16));
     }
 
     const t = frameIdx / fps;
+
+    // Seek video elements to current frame time
+    await seekVideosForExport(plan, t, assets);
+
+    // Render frame to canvas
     renderFrame(ctx, plan, t, width, height, assets);
 
     const timestampMicros = Math.round(t * 1_000_000);
@@ -212,7 +280,7 @@ async function exportViaWebCodecs(
     videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
     videoFrame.close();
 
-    const pct = Math.floor(10 + (frameIdx / totalFrames) * 80);
+    const pct = Math.floor(10 + (frameIdx / totalFrames) * 82);
     onProgress({
       percentage: pct,
       currentFrame: frameIdx,
@@ -221,7 +289,7 @@ async function exportViaWebCodecs(
     });
 
     if (frameIdx % 15 === 0) {
-      await new Promise(r => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
     }
   }
 
@@ -280,6 +348,7 @@ async function exportViaMediaRecorder(
 
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     const t = frameIdx / fps;
+    await seekVideosForExport(plan, t, assets);
     renderFrame(ctx, plan, t, width, height, assets);
 
     const pct = Math.floor((frameIdx / totalFrames) * 95);
@@ -290,7 +359,7 @@ async function exportViaMediaRecorder(
       phase: 'rendering',
     });
 
-    await new Promise(r => setTimeout(r, 1000 / fps));
+    await new Promise((r) => setTimeout(r, 1000 / fps));
   }
 
   recorder.stop();
@@ -307,12 +376,21 @@ async function exportViaMediaRecorder(
 }
 
 export async function downloadOrShareVideo(blob: Blob, filename: string): Promise<void> {
-  const isCapacitorNative = typeof window !== 'undefined' && (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+  const isCapacitorNative =
+    typeof window !== 'undefined' &&
+    (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
 
   const url = URL.createObjectURL(blob);
 
   if (isCapacitorNative) {
-    const capacitor = (window as unknown as { Capacitor?: { Plugins?: { Share?: { share: (opts: { title: string; url: string }) => Promise<void> } } } })?.Capacitor;
+    const capacitor = (
+      window as unknown as {
+        Capacitor?: {
+          Plugins?: { Share?: { share: (opts: { title: string; url: string }) => Promise<void> } };
+        };
+      }
+    )?.Capacitor;
+
     if (capacitor?.Plugins?.Share) {
       try {
         await capacitor.Plugins.Share.share({

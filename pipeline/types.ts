@@ -11,7 +11,7 @@ export type PipelineStepId =
 
 export interface PipelineProgressEvent {
   step: PipelineStepId;
-  stepIndex: number; // 1 to 7
+  stepIndex: number;
   totalSteps: number;
   percentage: number; // 0 to 100
   title: string;
@@ -24,5 +24,7 @@ export interface IngestedMedia {
   audioDuration: number;
   videoUrls: string[];
   imageUrls: string[];
+  musicUrl?: string;
   scriptText?: string;
+  isTalkingHead?: boolean;
 }

@@ -1,10 +1,9 @@
-// Reelix Primary One-Click Creation Wizard + Describe-to-Video & Magic Features
+// Reelix Single-Flow One-Click Creation Wizard
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useStudioStore } from '@/engine/store';
 import { runGeneratePipeline } from '@/pipeline/pipeline';
-import { DescribeToVideoService } from '@/ai/describe-to-video';
 import {
   Mic,
   MicOff,
@@ -16,9 +15,9 @@ import {
   Check,
   ChevronDown,
   Layers,
-  Zap,
-  Dice5,
-  Lightbulb,
+  Music,
+  Scissors,
+  HelpCircle,
 } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import confetti from 'canvas-confetti';
@@ -27,26 +26,27 @@ import { GamificationService } from '@/storage/gamification';
 export function CreateWizard() {
   const { setPipelineProgress, setPlan, setAssets, setActiveTab } = useStudioStore();
 
-  const [creationMode, setCreationMode] = useState<'standard' | 'describe'>('standard');
-  const [describePrompt, setDescribePrompt] = useState('');
-
-  // Inputs
-  const [scriptText, setScriptText] = useState('');
+  // Primary Voice & Media Inputs
   const [audioFile, setAudioFile] = useState<File | Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
-  // Optional Inputs
   const [videoFiles, setVideoFiles] = useState<File[]>([]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [language, setLanguage] = useState('auto');
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicFileName, setMusicFileName] = useState('');
+
+  // Editing Instructions & Reference
+  const [userPrompt, setUserPrompt] = useState('');
+  const [scriptText, setScriptText] = useState('');
+  const [removeSilence, setRemoveSilence] = useState(false);
+
+  // Styling & Niche
   const [niche, setNiche] = useState('Tech / AI');
   const [style, setStyle] = useState('Viral High Energy');
-  const [duration, setDuration] = useState<number | undefined>(30);
   const [captionStyle, setCaptionStyle] = useState('karaoke-word-highlight');
-  const [voiceName, setVoiceName] = useState('Puck');
-  const [userPrompt, setUserPrompt] = useState('');
+  const [language, setLanguage] = useState('auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Recorder refs
@@ -57,8 +57,9 @@ export function CreateWizard() {
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const hasVoice = !!audioFile;
-  const hasScript = scriptText.trim().length > 0;
-  const canGenerate = creationMode === 'describe' ? describePrompt.trim().length > 3 : (hasVoice || hasScript);
+  const hasVideo = videoFiles.length > 0;
+  // User must provide voice audio OR a video with speech
+  const canGenerate = hasVoice || hasVideo;
 
   useEffect(() => {
     return () => {
@@ -66,90 +67,6 @@ export function CreateWizard() {
       if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
     };
   }, []);
-
-  const getRandomSurprise = () => {
-    const surpriseTopics = [
-      'The 3 psychological tricks restaurants use to make you order more food',
-      'Why you should never charge your phone to 100% overnight',
-      'The 2-minute rule that permanently defeats procrastination',
-      'How artificial intelligence is rewriting the film industry in 2026',
-      '3 simple money habits that will save you $10,000 this year',
-    ];
-    const niches = ['Tech / AI', 'Finance', 'Psychology', 'Productivity', 'Storytelling'];
-    const styles = ['Viral High Energy', 'Documentary Film', 'Kinetic Typography', 'Cyberpunk Dark'];
-    const voices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede'];
-    const captionStyles = ['karaoke-word-highlight', 'bold-center', 'neon-glow', 'box-highlight', 'pop'];
-
-    return {
-      topic: surpriseTopics[Math.floor(Math.random() * surpriseTopics.length)],
-      niche: niches[Math.floor(Math.random() * niches.length)],
-      style: styles[Math.floor(Math.random() * styles.length)],
-      voice: voices[Math.floor(Math.random() * voices.length)],
-      captionStyle: captionStyles[Math.floor(Math.random() * captionStyles.length)],
-    };
-  };
-
-  const handleSurpriseMe = () => {
-    triggerHaptic('light');
-    const s = getRandomSurprise();
-    setCreationMode('describe');
-    setDescribePrompt(s.topic);
-    setNiche(s.niche);
-    setStyle(s.style);
-    setVoiceName(s.voice);
-    setCaptionStyle(s.captionStyle);
-    setDuration(30);
-  };
-
-  const handleMagicButton = async () => {
-    triggerHaptic('heavy');
-    const s = getRandomSurprise();
-    setCreationMode('describe');
-    setDescribePrompt(s.topic);
-    setNiche(s.niche);
-    setStyle(s.style);
-    setVoiceName(s.voice);
-    setCaptionStyle(s.captionStyle);
-
-    try {
-      const project = await DescribeToVideoService.createVideoFromDescription({
-        prompt: s.topic,
-        niche: s.niche,
-        style: s.style,
-        durationSec: 30,
-        voice: s.voice,
-        language: 'auto',
-        onProgress: (step, percent) => {
-          setPipelineProgress({
-            step: 'director',
-            stepIndex: 4,
-            totalSteps: 6,
-            percentage: percent,
-            title: step,
-            detail: `${percent}% complete`,
-          });
-        },
-      });
-
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#8B5CF6', '#06B6D4', '#FBBF24'],
-      });
-
-      GamificationService.recordAction('use_template');
-
-      setTimeout(() => {
-        setPipelineProgress(null);
-        setPlan(project.editPlan);
-        setActiveTab('editor');
-      }, 600);
-    } catch (err: unknown) {
-      setPipelineProgress(null);
-      alert(`Magic Button Error: ${(err as Error).message}`);
-    }
-  };
 
   const startRecording = async () => {
     triggerHaptic('medium');
@@ -159,7 +76,9 @@ export function CreateWizard() {
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -201,7 +120,7 @@ export function CreateWizard() {
       recorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         setAudioFile(audioBlob);
-        setAudioFileName(`mic_recording_${Date.now()}.webm`);
+        setAudioFileName(`voice_recording_${Date.now()}.webm`);
         setIsRecording(false);
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
         if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
@@ -257,59 +176,31 @@ export function CreateWizard() {
     }
   };
 
+  const handleMusicUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      triggerHaptic('light');
+      setMusicFile(file);
+      setMusicFileName(file.name);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!canGenerate) return;
     triggerHaptic('heavy');
 
     try {
-      if (creationMode === 'describe') {
-        const project = await DescribeToVideoService.createVideoFromDescription({
-          prompt: describePrompt,
-          niche,
-          style,
-          durationSec: duration || 30,
-          voice: voiceName,
-          language,
-          onProgress: (step, percent) => {
-            setPipelineProgress({
-              step: 'director',
-              stepIndex: 4,
-              totalSteps: 6,
-              percentage: percent,
-              title: step,
-              detail: `${percent}% complete`,
-            });
-          },
-        });
-
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#8B5CF6', '#06B6D4', '#FBBF24'],
-        });
-
-        GamificationService.recordAction('use_template');
-
-        setTimeout(() => {
-          setPipelineProgress(null);
-          setPlan(project.editPlan);
-          setActiveTab('editor');
-        }, 600);
-        return;
-      }
-
       const res = await runGeneratePipeline({
         audioFile: audioFile || undefined,
         scriptText: scriptText.trim() || undefined,
         videoFiles: videoFiles.length > 0 ? videoFiles : undefined,
         imageFiles: imageFiles.length > 0 ? imageFiles : undefined,
+        musicFile: musicFile || undefined,
+        removeSilence,
         language,
         niche,
         style,
-        targetDuration: duration,
         captionStyle,
-        voiceName,
         userPrompt: userPrompt.trim() || undefined,
         onProgress: (evt) => {
           setPipelineProgress(evt);
@@ -330,7 +221,7 @@ export function CreateWizard() {
         setPlan(res.plan);
         setAssets(res.assets);
         setActiveTab('editor');
-      }, 600);
+      }, 500);
     } catch (err: unknown) {
       setPipelineProgress(null);
       const msg = err instanceof Error ? err.message : 'Video generation failed.';
@@ -340,239 +231,199 @@ export function CreateWizard() {
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6 pb-24">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2.5">
-            <span>Create Viral Vertical Short</span>
-            <span className="text-xs px-2 py-0.5 rounded-full brand-gradient text-white font-bold uppercase tracking-wider">
-              1080×1920
-            </span>
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Turn voice audio, written scripts, or a text concept into a polished Short with AI.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSurpriseMe}
-            className="px-3.5 py-2 rounded-2xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition-all"
-          >
-            <Dice5 className="w-3.5 h-3.5" />
-            Surprise Me
-          </button>
-
-          <button
-            type="button"
-            onClick={handleMagicButton}
-            className="px-4 py-2 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 text-xs font-bold text-white shadow-lg shadow-violet-500/20 flex items-center gap-1.5 transition-all"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            Magic Button
-          </button>
-        </div>
+      {/* Page Title & Badges */}
+      <div className="space-y-1">
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2.5">
+          <span>Create Vertical Short</span>
+          <span className="text-xs px-2.5 py-0.5 rounded-full brand-gradient text-white font-bold uppercase tracking-wider">
+            1080×1920 · 9:16
+          </span>
+        </h1>
+        <p className="text-xs sm:text-sm text-slate-400">
+          Upload your voice or video, optional clips/music, and describe the edit. Output length matches your real voice.
+        </p>
       </div>
 
-      <div className="flex items-center gap-2 p-1.5 bg-white/5 rounded-2xl border border-white/5 w-fit">
-        <button
-          type="button"
-          onClick={() => setCreationMode('standard')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-            creationMode === 'standard'
-              ? 'bg-violet-600 text-white shadow-md'
-              : 'text-white/60 hover:text-white'
-          }`}
-        >
-          Voice / Script Mode
-        </button>
-        <button
-          type="button"
-          onClick={() => setCreationMode('describe')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-            creationMode === 'describe'
-              ? 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-md'
-              : 'text-white/60 hover:text-white'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 text-cyan-200" />
-          Describe-to-Video (Text Only)
-        </button>
-      </div>
-
-      {creationMode === 'describe' && (
-        <div className="p-6 rounded-3xl glass-card border border-violet-500/30 bg-violet-950/10 space-y-4">
-          <div className="flex items-center gap-2">
-            <Lightbulb className="w-5 h-5 text-cyan-400" />
-            <h3 className="text-sm font-bold text-white">Describe Your Short Concept</h3>
-          </div>
-          <p className="text-xs text-white/60 leading-relaxed">
-            The AI Director will write a script with a 3-second hook, synthesize voiceover with Gemini TTS, select B-roll, and assemble the timeline.
-          </p>
-
-          <textarea
-            rows={4}
-            value={describePrompt}
-            onChange={(e) => setDescribePrompt(e.target.value)}
-            placeholder="e.g. 'Why 99% of people quit their morning workout routine and the 2-minute psychological rule to never miss a day again...'"
-            className="w-full p-4 rounded-2xl bg-[#0B0B0F] border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-violet-500 transition-colors resize-none"
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-            <div>
-              <label className="text-xs text-white/60 mb-1 block">Voice Actor</label>
-              <select
-                value={voiceName}
-                onChange={(e) => setVoiceName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
-              >
-                <option value="Puck">Puck (Energetic Male)</option>
-                <option value="Charon">Charon (Deep Authoritative)</option>
-                <option value="Kore">Kore (Warm Female)</option>
-                <option value="Fenrir">Fenrir (Intense Bold)</option>
-                <option value="Aoede">Aoede (Clear Professional)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60 mb-1 block">Duration</label>
-              <select
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
-              >
-                <option value={30}>30 Seconds (Fast Punch)</option>
-                <option value={45}>45 Seconds (Standard Viral)</option>
-                <option value={60}>60 Seconds (Full Breakdown)</option>
-                <option value={90}>90 Seconds (Deep Dive)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60 mb-1 block">Caption Style</label>
-              <select
-                value={captionStyle}
-                onChange={(e) => setCaptionStyle(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
-              >
-                <option value="karaoke-word-highlight">Karaoke Word Glow</option>
-                <option value="bold-center">Viral Bold Center</option>
-                <option value="neon-glow">Cyber Neon Glow</option>
-                <option value="box-highlight">Color Box Badge</option>
-                <option value="pop">Bouncy Word Pop</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {creationMode === 'standard' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className={`p-5 rounded-3xl glass-card border transition-all ${
+      {/* CORE INPUT ZONE */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* VOICE INPUT CARD */}
+        <div
+          className={`p-5 rounded-3xl glass-card border transition-all ${
             hasVoice ? 'border-violet-500/40 bg-violet-950/10' : 'border-white/5'
-          }`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-violet-500/20 text-violet-400 flex items-center justify-center">
-                  <Mic className="w-4 h-4" />
-                </div>
-                <span className="text-sm font-bold text-white">Voice Audio</span>
+          }`}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-violet-500/20 text-violet-400 flex items-center justify-center">
+                <Mic className="w-4 h-4" />
               </div>
-              {hasVoice && (
-                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> Attached
+              <div>
+                <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <span>Voice Audio</span>
+                  {!hasVideo && <span className="text-rose-400 text-[10px]">*Required</span>}
                 </span>
-              )}
+                <p className="text-[11px] text-slate-400">Record in-app or upload voice track</p>
+              </div>
             </div>
-
-            <div className="space-y-4">
-              {!isRecording ? (
-                <button
-                  type="button"
-                  onClick={startRecording}
-                  className="w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 border border-white/5 transition-colors"
-                >
-                  <Mic className="w-4 h-4 text-violet-400" />
-                  <span>Record Voiceover in App</span>
-                </button>
-              ) : (
-                <div className="space-y-3 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5 animate-pulse">
-                      <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      Recording Live ({recordingSeconds}s)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={stopRecording}
-                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 transition-colors"
-                    >
-                      <MicOff className="w-3.5 h-3.5" /> Stop
-                    </button>
-                  </div>
-                  <canvas ref={visualizerCanvasRef} width={280} height={36} className="w-full h-9 rounded-lg bg-black/40" />
-                </div>
-              )}
-
-              <div className="text-center text-[10px] text-slate-500 uppercase font-mono tracking-wider">— OR UPLOAD AUDIO —</div>
-
-              <label className="flex flex-col items-center justify-center p-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-colors">
-                <Upload className="w-5 h-5 text-slate-400 mb-1" />
-                <span className="text-xs font-medium text-slate-300">
-                  {audioFileName || 'Upload Voice File (.mp3, .wav, .m4a)'}
-                </span>
-                <input type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" />
-              </label>
-            </div>
+            {hasVoice && (
+              <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Attached
+              </span>
+            )}
           </div>
 
-          <div className={`p-5 rounded-3xl glass-card border transition-all ${
-            hasScript ? 'border-cyan-500/40 bg-cyan-950/10' : 'border-white/5'
-          }`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                  <FileText className="w-4 h-4" />
-                </div>
-                <span className="text-sm font-bold text-white">Script Text</span>
-              </div>
-              {hasScript && (
-                <span className="text-[11px] font-semibold text-cyan-400 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> Provided
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <textarea
-                rows={5}
-                placeholder="Type or paste your voiceover script here. If no audio is attached, Gemini TTS will generate voiceover..."
-                value={scriptText}
-                onChange={(e) => setScriptText(e.target.value)}
-                className="w-full p-3.5 rounded-2xl bg-[#0B0B0F] border border-white/10 text-white text-xs placeholder:text-slate-400 focus:outline-none focus:border-cyan-500 transition-colors resize-none leading-relaxed"
-              />
-
-              {!hasVoice && hasScript && (
-                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-[11px] text-cyan-300 flex items-center justify-between">
-                  <span>TTS Voice: {voiceName}</span>
-                  <select
-                    value={voiceName}
-                    onChange={(e) => setVoiceName(e.target.value)}
-                    className="bg-[#0B0B0F] text-white text-[11px] rounded-lg px-2 py-1 border border-white/10"
+          <div className="space-y-3">
+            {!isRecording ? (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 border border-white/5 transition-colors"
+              >
+                <Mic className="w-4 h-4 text-violet-400" />
+                <span>Record Voice in App</span>
+              </button>
+            ) : (
+              <div className="space-y-3 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    Recording Live ({recordingSeconds}s)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 transition-colors"
                   >
-                    <option value="Puck">Puck</option>
-                    <option value="Charon">Charon</option>
-                    <option value="Kore">Kore</option>
-                    <option value="Fenrir">Fenrir</option>
-                    <option value="Aoede">Aoede</option>
-                  </select>
+                    <MicOff className="w-3.5 h-3.5" /> Stop
+                  </button>
                 </div>
-              )}
+                <canvas
+                  ref={visualizerCanvasRef}
+                  width={280}
+                  height={36}
+                  className="w-full h-9 rounded-lg bg-black/40"
+                />
+              </div>
+            )}
+
+            <div className="text-center text-[10px] text-slate-500 uppercase font-mono tracking-wider">
+              — OR UPLOAD AUDIO FILE —
             </div>
+
+            <label className="flex flex-col items-center justify-center p-3.5 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-colors">
+              <Upload className="w-4 h-4 text-slate-400 mb-1" />
+              <span className="text-xs font-medium text-slate-300 truncate max-w-[240px]">
+                {audioFileName || 'Upload Voice (.mp3, .wav, .m4a)'}
+              </span>
+              <input type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" />
+            </label>
           </div>
         </div>
-      )}
 
+        {/* DESCRIBE THE EDIT & SCRIPT */}
+        <div className="p-5 rounded-3xl glass-card border border-white/5 space-y-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <span className="text-sm font-bold text-white">Describe the Edit</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-2">
+              Tell Director AI exactly how you want the video paced, cut, and styled.
+            </p>
+            <textarea
+              rows={3}
+              value={userPrompt}
+              onChange={(e) => setUserPrompt(e.target.value)}
+              placeholder="e.g. 'Fast punchy hook in first 2 seconds, zoom-punch on key revelations, remove all pauses, neon yellow captions'"
+              className="w-full p-3.5 rounded-2xl bg-[#0B0B0F] border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 transition-colors resize-none leading-relaxed"
+            />
+          </div>
+
+          {/* Silence Removal Quick Option */}
+          <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Scissors className="w-4 h-4 text-cyan-400" />
+              <div>
+                <span className="text-xs font-semibold text-white">Auto-Remove Pauses & Silence</span>
+                <p className="text-[10px] text-slate-400">Detects dead-air gaps via 20ms RMS windows</p>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={removeSilence}
+              onChange={(e) => setRemoveSilence(e.target.checked)}
+              className="w-4 h-4 rounded accent-cyan-500 cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* CLIPS, IMAGES & MUSIC ROW */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* User Video Clips */}
+        <div className="p-4 rounded-3xl glass-card border border-white/5 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-white flex items-center gap-1.5">
+              <Video className="w-3.5 h-3.5 text-violet-400" />
+              <span>Video Clips</span>
+            </label>
+            {videoFiles.length > 0 && (
+              <span className="text-[10px] text-violet-400 font-bold">{videoFiles.length} attached</span>
+            )}
+          </div>
+          <p className="text-[10px] text-slate-400">
+            {hasVoice ? 'Optional B-Roll footage' : 'Can provide spoken audio from clip'}
+          </p>
+          <label className="flex items-center justify-center p-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] cursor-pointer hover:border-violet-500/40 text-xs text-slate-300 transition-colors">
+            <span className="truncate">
+              {videoFiles.length > 0 ? `${videoFiles.length} clips attached` : 'Upload Clips (.mp4, .mov)'}
+            </span>
+            <input type="file" multiple accept="video/*" onChange={handleVideoUpload} className="hidden" />
+          </label>
+        </div>
+
+        {/* User Images */}
+        <div className="p-4 rounded-3xl glass-card border border-white/5 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-white flex items-center gap-1.5">
+              <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Images & Logos</span>
+            </label>
+            {imageFiles.length > 0 && (
+              <span className="text-[10px] text-cyan-400 font-bold">{imageFiles.length} attached</span>
+            )}
+          </div>
+          <p className="text-[10px] text-slate-400">Optional photos, charts, or slides</p>
+          <label className="flex items-center justify-center p-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] cursor-pointer hover:border-cyan-500/40 text-xs text-slate-300 transition-colors">
+            <span className="truncate">
+              {imageFiles.length > 0 ? `${imageFiles.length} images attached` : 'Upload Images (.jpg, .png)'}
+            </span>
+            <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
+          </label>
+        </div>
+
+        {/* Background Music File */}
+        <div className="p-4 rounded-3xl glass-card border border-white/5 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-white flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5 text-amber-400" />
+              <span>Background Music</span>
+            </label>
+            {musicFile && (
+              <span className="text-[10px] text-amber-400 font-bold">Attached</span>
+            )}
+          </div>
+          <p className="text-[10px] text-slate-400">Optional custom track (auto-ducked)</p>
+          <label className="flex items-center justify-center p-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] cursor-pointer hover:border-amber-500/40 text-xs text-slate-300 transition-colors">
+            <span className="truncate">
+              {musicFileName || 'Upload Music (.mp3, .wav)'}
+            </span>
+            <input type="file" accept="audio/*" onChange={handleMusicUpload} className="hidden" />
+          </label>
+        </div>
+      </div>
+
+      {/* ADVANCED SETTINGS (Script Spelling, Caption Style, Niche) */}
       <div className="rounded-3xl glass-card border border-white/5 overflow-hidden">
         <button
           type="button"
@@ -581,14 +432,50 @@ export function CreateWizard() {
         >
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-violet-400" />
-            <span className="text-xs font-bold text-white">Advanced Style, B-Roll & Niche Tuning</span>
+            <span className="text-xs font-bold text-white">
+              Script Reference, Caption Style & Niche Settings
+            </span>
           </div>
-          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+          <ChevronDown
+            className={`w-4 h-4 text-slate-400 transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
+          />
         </button>
 
         {showAdvanced && (
           <div className="p-5 border-t border-white/5 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Script Text (Optional spelling reference)</span>
+                </label>
+                <span className="text-[10px] text-slate-400">Used strictly to ensure accurate word spelling</span>
+              </div>
+              <textarea
+                rows={3}
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                placeholder="Paste your voiceover script here to ensure brand names, technical terms, and foreign words are spelled accurately in captions..."
+                className="w-full p-3 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-cyan-500 resize-none leading-relaxed"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Caption Style</label>
+                <select
+                  value={captionStyle}
+                  onChange={(e) => setCaptionStyle(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500"
+                >
+                  <option value="karaoke-word-highlight">Karaoke Word Glow</option>
+                  <option value="bold-center">Viral Bold Center</option>
+                  <option value="neon-glow">Cyber Neon Glow</option>
+                  <option value="box-highlight">Color Box Badge</option>
+                  <option value="pop">Bouncy Word Pop</option>
+                </select>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-300">Niche Category</label>
                 <select
@@ -634,45 +521,11 @@ export function CreateWizard() {
                 </select>
               </div>
             </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Describe What You Want (Free Text Prompt)</label>
-              <textarea
-                rows={2}
-                value={userPrompt}
-                onChange={(e) => setUserPrompt(e.target.value)}
-                placeholder="e.g. 'Add zoom punches on key words, dark cinematic lighting, high-contrast yellow captions'"
-                className="w-full p-3 rounded-xl bg-[#0B0B0F] border border-white/10 text-white text-xs focus:outline-none focus:border-violet-500 resize-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                  <Video className="w-3.5 h-3.5 text-violet-400" />
-                  Your Own Video Clips (Optional)
-                </label>
-                <label className="flex items-center justify-center p-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] cursor-pointer hover:border-violet-500/40 text-xs text-slate-400 transition-colors">
-                  <span>{videoFiles.length > 0 ? `${videoFiles.length} clips attached` : 'Upload Portrait Clips'}</span>
-                  <input type="file" multiple accept="video/*" onChange={handleVideoUpload} className="hidden" />
-                </label>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-                  Your Own Images (Optional)
-                </label>
-                <label className="flex items-center justify-center p-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] cursor-pointer hover:border-cyan-500/40 text-xs text-slate-400 transition-colors">
-                  <span>{imageFiles.length > 0 ? `${imageFiles.length} images attached` : 'Upload Images/Logos'}</span>
-                  <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
-                </label>
-              </div>
-            </div>
           </div>
         )}
       </div>
 
+      {/* GENERATE BUTTON */}
       <div className="pt-2">
         <button
           type="button"
@@ -681,12 +534,13 @@ export function CreateWizard() {
           className="w-full py-4 rounded-3xl brand-gradient text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-2xl shadow-violet-500/30 hover:opacity-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
           <Sparkles className="w-5 h-5 text-cyan-200" />
-          <span>
-            {creationMode === 'describe'
-              ? 'Generate Short from Description'
-              : 'Generate Reelix Short (1080×1920)'}
-          </span>
+          <span>Generate Reelix Short (1080×1920)</span>
         </button>
+        {!canGenerate && (
+          <p className="text-center text-[11px] text-slate-500 mt-2">
+            Please attach a voice recording/audio file, or upload a video clip with speech to begin.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 // Storage and real test validators for API keys
 import { nativeFetch } from '../ai/http';
-import { fetchRemoteModelsWithDetail, resolveTextModel, resolveTtsModel } from '../ai/models';
+import { fetchRemoteModelsWithDetail, resolveTextModel } from '../ai/models';
 import { callGeminiRaw } from '../ai/gemini';
 
 export interface ApiKeys {
@@ -54,9 +54,8 @@ export const ApiKeysService = {
     }
 
     try {
-      // Step 2: Resolve active text and voice models
+      // Step 2: Resolve active text model
       const textModel = await resolveTextModel(undefined, true);
-      const ttsModel = await resolveTtsModel(true);
 
       // Step 3: Send tiny generateContent test call
       const res = await callGeminiRaw(
@@ -71,7 +70,7 @@ export const ApiKeysService = {
       if (reply || res.candidates?.[0]) {
         return {
           success: true,
-          message: `Connected. Text model: ${textModel} | Voice model: ${ttsModel}`,
+          message: `Connected! Active model: ${textModel}`,
         };
       } else {
         return { success: false, message: 'Gemini API returned an invalid response structure.' };

@@ -1,24 +1,25 @@
-// 7-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator with detailed error visibility
+// 6-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator with detailed error visibility
 import { PipelineProgressEvent } from './types';
 import { ingestMediaInputs } from './ingest';
 import { transcribeAudio } from '../ai/whisper';
+import { analyzeVideoClipsWithGemini } from '../ai/clip-analysis';
 import { generateDirectorPlan } from '../ai/director';
-import { generateGeminiTtsAudio } from '../ai/gemini';
 import { resolveStockVideos, resolveBackgroundMusic } from './assets';
 import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { AssetCache } from '../engine/renderer';
+import { ensureAssets } from '../engine/media';
 import { ApiKeysService } from '../storage/keys';
 import { ProjectDb } from '../storage/db';
 
 export interface GenerateShortsOptions {
   audioFile?: File | Blob;
   scriptText?: string;
-  voiceName?: string;
   videoFiles?: File[];
   imageFiles?: File[];
+  musicFile?: File | Blob;
+  removeSilence?: boolean;
   niche?: string;
   style?: string;
-  targetDuration?: number;
   captionStyle?: string;
   userPrompt?: string;
   language?: string;
@@ -36,97 +37,100 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     step: 'ingest',
     stepIndex: 1,
     totalSteps: 6,
-    percentage: 12,
-    title: 'Ingesting Media & Storing to OPFS',
-    detail: 'Reading audio, media durations, and caching to Origin Private File System...',
+    percentage: 14,
+    title: 'Reading Files & Media Analysis',
+    detail: 'Caching video clips, audio tracks, and images to high-speed local OPFS...',
   });
 
   let ingested;
-  let finalVoiceUrl: string | undefined;
-  let finalDuration: number;
-  let voiceBlob: Blob | undefined;
-
   try {
     ingested = await ingestMediaInputs({
       audioFile: opts.audioFile,
       script: opts.scriptText,
       videoFiles: opts.videoFiles,
       imageFiles: opts.imageFiles,
+      musicFile: opts.musicFile,
     });
-
-    finalVoiceUrl = ingested.audioUrl;
-    finalDuration = ingested.audioDuration;
-    voiceBlob = ingested.audioBlob;
-
-    if (!finalVoiceUrl && opts.scriptText) {
-      onProgress({
-        step: 'ingest',
-        stepIndex: 1,
-        totalSteps: 6,
-        percentage: 20,
-        title: 'Generating AI Voiceover',
-        detail: `Synthesizing script with voice persona "${opts.voiceName || 'Puck'}"...`,
-      });
-      const ttsRes = await generateGeminiTtsAudio(opts.scriptText, opts.voiceName || 'Puck');
-      finalVoiceUrl = ttsRes.audioUrl;
-      voiceBlob = ttsRes.audioBlob;
-      finalDuration = ttsRes.durationSec;
-    }
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 1 – Ingest:', err);
-    throw new Error(`Step 1 – Ingest: ${msg}`);
+    console.error('[Pipeline Error] Step 1 – Reading files:', err);
+    throw new Error(`Step 1 – Reading files: ${msg}`);
   }
 
-  // STEP 2: TRANSCRIBE
+  // Check user prompt for silence keywords
+  const promptLower = (opts.userPrompt || '').toLowerCase();
+  const silenceRequested =
+    opts.removeSilence ||
+    promptLower.includes('silence') ||
+    promptLower.includes('pause') ||
+    promptLower.includes('gap') ||
+    promptLower.includes('dead air') ||
+    promptLower.includes('সাইলেন্স');
+
+  // STEP 2: TRANSCRIBE & SILENCE COMPACTION
   onProgress({
     step: 'transcribe',
     stepIndex: 2,
     totalSteps: 6,
-    percentage: 35,
-    title: 'Transcribing & Aligning Word Timestamps',
-    detail: 'Generating micro-timed word timestamps for animated viral captions...',
+    percentage: 32,
+    title: silenceRequested ? 'Listening to Voice & Removing Silences' : 'Listening to Voice & Word Alignment',
+    detail: silenceRequested
+      ? 'Detecting 20ms silence windows, compacting speech segments, and extracting verbatim words...'
+      : 'Generating word-level timestamps and timing boundaries with Gemini...',
   });
 
   let transcription;
+  let finalDuration = ingested.audioDuration;
+  let finalVoiceUrl = ingested.audioUrl;
+
   try {
     transcription = await transcribeAudio(
-      voiceBlob || new Blob([]),
-      finalDuration,
-      opts.scriptText
+      ingested.audioBlob!,
+      ingested.audioDuration,
+      opts.scriptText,
+      silenceRequested
     );
+
+    if (transcription.processedBlob && transcription.processedDuration) {
+      finalDuration = transcription.processedDuration;
+    }
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 2 – Transcribe:', err);
-    throw new Error(`Step 2 – Transcribe: ${msg}`);
+    console.error('[Pipeline Error] Step 2 – Listening to voice:', err);
+    throw new Error(`Step 2 – Listening to voice: ${msg}`);
   }
 
-  // STEP 3: ANALYZE
+  // STEP 3: UNDERSTAND CLIPS
   onProgress({
     step: 'analyze',
     stepIndex: 3,
     totalSteps: 6,
     percentage: 48,
-    title: 'Analyzing Scenes & 9:16 Focal Framing',
-    detail: 'Detecting visual hooks, facial focus coordinates, and pacing rhythm...',
+    title: 'Understanding Video Clips',
+    detail: ingested.videoUrls.length > 0
+      ? `Sampling video frames across ${ingested.videoUrls.length} clips and analyzing focal centers...`
+      : 'Setting up dynamic 9:16 layout structure...',
   });
 
+  let clipAnalysis;
   try {
-    await new Promise(r => setTimeout(r, 200));
+    if (ingested.videoUrls.length > 0) {
+      clipAnalysis = await analyzeVideoClipsWithGemini(ingested.videoUrls);
+    }
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 3 – Analyze:', err);
-    throw new Error(`Step 3 – Analyze: ${msg}`);
+    console.error('[Pipeline Error] Step 3 – Understanding clips:', err);
+    throw new Error(`Step 3 – Understanding clips: ${msg}`);
   }
 
-  // STEP 4: DIRECTOR
+  // STEP 4: DIRECTOR PLANNING
   onProgress({
     step: 'director',
     stepIndex: 4,
     totalSteps: 6,
-    percentage: 65,
-    title: 'Director AI Crafting Viral Edit Plan',
-    detail: 'Constructing 2s hook, scene cuts, zoom punches, and auto-ducking rules...',
+    percentage: 66,
+    title: 'Director AI Planning Cut Sequence',
+    detail: 'Structuring 2s viral hook, matching pacing rhythm, and locking timeline cut points...',
   });
 
   let directorResult;
@@ -140,9 +144,11 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
         voiceDuration: finalDuration,
         userVideoUrls: ingested.videoUrls,
         userImageUrls: ingested.imageUrls,
+        clipAnalysis,
+        mode: ingested.isTalkingHead ? 'talking-head' : 'broll',
         niche: opts.niche,
         style: opts.style,
-        targetDuration: opts.targetDuration || finalDuration,
+        targetDuration: finalDuration,
         captionStyle: opts.captionStyle,
         userPrompt: opts.userPrompt,
         language: opts.language,
@@ -153,77 +159,71 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     plan = directorResult.editPlan;
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 4 – Director:', err);
-    throw new Error(`Step 4 – Director: ${msg}`);
+    console.error('[Pipeline Error] Step 4 – Director planning:', err);
+    throw new Error(`Step 4 – Director planning: ${msg}`);
   }
 
-  // STEP 5: RESOLVE ASSETS
+  // STEP 5: COLLECTING ASSETS
   onProgress({
     step: 'assets',
     stepIndex: 5,
     totalSteps: 6,
-    percentage: 82,
-    title: 'Resolving B-Roll, SFX & Auto-Ducked Music',
-    detail: 'Fetching portrait stock footage, synthesizing SFX, and composing soundtrack...',
+    percentage: 84,
+    title: 'Collecting B-Roll & Soundtrack',
+    detail: 'Assigning media layers and setting up auto-ducking audio parameters...',
   });
 
   try {
-    const stockVideos = await resolveStockVideos(directorResult.bRollQueries);
-    let stockIdx = 0;
-    for (const layer of plan.layers) {
-      if (layer.type === 'video' && !layer.src) {
-        if (stockVideos[stockIdx]) {
-          (layer as VideoLayer).src = stockVideos[stockIdx];
-          stockIdx++;
-        } else if (ingested.videoUrls.length > 0) {
-          (layer as VideoLayer).src = ingested.videoUrls[stockIdx % ingested.videoUrls.length];
+    if (!ingested.isTalkingHead && plan.layers.some((l) => l.type === 'video' && !(l as VideoLayer).src)) {
+      const stockVideos = await resolveStockVideos(directorResult.bRollQueries);
+      let stockIdx = 0;
+      for (const layer of plan.layers) {
+        if (layer.type === 'video' && !(layer as VideoLayer).src) {
+          if (stockVideos[stockIdx]) {
+            (layer as VideoLayer).src = stockVideos[stockIdx];
+            stockIdx++;
+          } else if (ingested.videoUrls.length > 0) {
+            (layer as VideoLayer).src = ingested.videoUrls[stockIdx % ingested.videoUrls.length];
+          }
         }
       }
     }
 
-    const bgMusicUrl = await resolveBackgroundMusic(opts.style === 'Hype Beast / High Energy' ? 'hype' : 'upbeat', plan.duration);
-    const musicLayer = plan.layers.find(l => l.type === 'audio' && (l as AudioLayer).audioType === 'music') as AudioLayer | undefined;
+    // Soundtrack: use user uploaded music or resolve default background track
+    const musicLayer = plan.layers.find(
+      (l) => l.type === 'audio' && (l as AudioLayer).audioType === 'music'
+    ) as AudioLayer | undefined;
+
     if (musicLayer) {
-      musicLayer.src = bgMusicUrl;
+      if (ingested.musicUrl) {
+        musicLayer.src = ingested.musicUrl;
+      } else {
+        const bgMusicUrl = await resolveBackgroundMusic(
+          opts.style === 'Viral High Energy' ? 'hype' : 'upbeat',
+          plan.duration
+        );
+        musicLayer.src = bgMusicUrl;
+      }
     }
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 5 – Assets:', err);
-    throw new Error(`Step 5 – Assets: ${msg}`);
+    console.error('[Pipeline Error] Step 5 – Collecting assets:', err);
+    throw new Error(`Step 5 – Collecting assets: ${msg}`);
   }
 
-  // STEP 6: PREPARE PREVIEW
+  // STEP 6: LOADING PREVIEW
   onProgress({
     step: 'preview',
     stepIndex: 6,
     totalSteps: 6,
-    percentage: 95,
-    title: 'Preloading Canvas Proxy Engine',
-    detail: 'Buffering video decoders and initializing Web Audio mixer...',
+    percentage: 96,
+    title: 'Loading Preview & Initializing Decoders',
+    detail: 'Preloading canvas assets and saving project to IndexedDB...',
   });
 
-  const assetCache: AssetCache = {
-    videos: new Map(),
-    images: new Map(),
-  };
-
+  let loadedAssets: AssetCache;
   try {
-    for (const layer of plan.layers) {
-      if (layer.type === 'video' && layer.src && !assetCache.videos.has(layer.src)) {
-        const v = document.createElement('video');
-        v.src = layer.src;
-        v.crossOrigin = 'anonymous';
-        v.muted = true;
-        v.playsInline = true;
-        v.preload = 'auto';
-        assetCache.videos.set(layer.src, v);
-      } else if (layer.type === 'image' && layer.src && !assetCache.images.has(layer.src)) {
-        const img = new Image();
-        img.src = layer.src;
-        img.crossOrigin = 'anonymous';
-        assetCache.images.set(layer.src, img);
-      }
-    }
+    loadedAssets = await ensureAssets(plan);
 
     await ProjectDb.saveProject({
       id: plan.id,
@@ -235,8 +235,8 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     });
   } catch (err: unknown) {
     const msg = (err as Error).message || String(err);
-    console.error('[Pipeline Error] Step 6 – Preview:', err);
-    throw new Error(`Step 6 – Preview: ${msg}`);
+    console.error('[Pipeline Error] Step 6 – Loading preview:', err);
+    throw new Error(`Step 6 – Loading preview: ${msg}`);
   }
 
   onProgress({
@@ -245,45 +245,8 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     totalSteps: 6,
     percentage: 100,
     title: 'Ready for Live Preview & Editing',
-    detail: 'Complete! Studio preview and manual timeline ready.',
+    detail: 'Complete! Your vertical Short is ready in the studio.',
   });
 
-  return { plan, assets: assetCache };
+  return { plan, assets: loadedAssets };
 }
-
-export const PipelineRunner = {
-  run: async (opts: {
-    script: string;
-    voiceAudioBlob?: Blob;
-    niche?: string;
-    style?: string;
-    targetDuration?: number;
-    captionStyle?: string;
-    promptDescription?: string;
-    language?: string;
-    onProgress?: (step: string, percent: number) => void;
-  }) => {
-    const res = await runGeneratePipeline({
-      audioFile: opts.voiceAudioBlob,
-      scriptText: opts.script,
-      niche: opts.niche,
-      style: opts.style,
-      targetDuration: opts.targetDuration,
-      captionStyle: opts.captionStyle,
-      userPrompt: opts.promptDescription,
-      language: opts.language,
-      onProgress: (evt) => {
-        opts.onProgress?.(evt.title || evt.detail, evt.percentage);
-      },
-    });
-    return {
-      id: res.plan.id,
-      title: res.plan.title,
-      duration: res.plan.duration,
-      updatedAt: Date.now(),
-      createdAt: Date.now(),
-      editPlan: res.plan,
-      plan: res.plan,
-    };
-  },
-};

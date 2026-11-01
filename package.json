@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:static": "BUILD_TARGET=static next build",
+    "build": "NODE_ENV=production next build",
+    "build:static": "NODE_ENV=production BUILD_TARGET=static next build",
     "start": "next start",
     "lint": "eslint .",
     "clean": "next clean"

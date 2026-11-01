@@ -9,6 +9,14 @@ export interface AssetCache {
   bitmaps?: Map<string, ImageBitmap>;
 }
 
+// Module-level snapshot canvas cache for transition rendering
+const transitionSnapshotCanvas: HTMLCanvasElement | null =
+  typeof document !== 'undefined' ? document.createElement('canvas') : null;
+if (transitionSnapshotCanvas) {
+  transitionSnapshotCanvas.width = 1080;
+  transitionSnapshotCanvas.height = 1920;
+}
+
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
   plan: EditPlan,
@@ -33,7 +41,8 @@ export function renderFrame(
 
   const sortedLayers = [...plan.layers].sort((a, b) => a.trackIndex - b.trackIndex);
 
-  for (const layer of sortedLayers) {
+  for (let i = 0; i < sortedLayers.length; i++) {
+    const layer = sortedLayers[i];
     if (!isLayerActive(layer, currentTime)) continue;
 
     const layerRelTime = currentTime - layer.startTime;
@@ -77,25 +86,41 @@ export function renderFrame(
       }
     }
 
-    // Render by layer type
-    switch (layer.type) {
-      case 'video':
-        renderVideoLayer(ctx, layer, layerRelTime, CANONICAL_W, CANONICAL_H, assets);
-        break;
-      case 'image':
-        renderImageLayer(ctx, layer, layerProgress, CANONICAL_W, CANONICAL_H, assets);
-        break;
-      case 'shape':
-        renderShapeLayer(ctx, layer, CANONICAL_W, CANONICAL_H);
-        break;
-      case 'text':
-        renderTextLayer(ctx, layer, layerRelTime, CANONICAL_W, CANONICAL_H);
-        break;
-      case 'caption':
-        renderCaptionLayer(ctx, layer, currentTime, CANONICAL_W, CANONICAL_H);
-        break;
-      default:
-        break;
+    // Check transition on visual layers
+    const transition = (layer as VideoLayer | ImageLayer).transitionIn;
+    const isTransitioning =
+      transition &&
+      transition.type &&
+      transition.duration > 0 &&
+      layerRelTime < transition.duration;
+
+    if (isTransitioning) {
+      const transDef = Registry.getTransition(transition.type);
+      if (transDef) {
+        const transProgress = Math.max(0, Math.min(1, layerRelTime / transition.duration));
+        const previousVisualLayer = sortedLayers
+          .slice(0, i)
+          .reverse()
+          .find((l) => (l.type === 'video' || l.type === 'image') && l.startTime + l.duration <= layer.startTime + 0.1);
+
+        const renderTo = () => {
+          renderLayerContent(ctx, layer, layerRelTime, layerProgress, currentTime, CANONICAL_W, CANONICAL_H, assets);
+        };
+
+        const renderFrom = () => {
+          if (previousVisualLayer) {
+            renderLayerContent(ctx, previousVisualLayer, previousVisualLayer.duration, 1, previousVisualLayer.startTime + previousVisualLayer.duration, CANONICAL_W, CANONICAL_H, assets);
+          } else {
+            drawDarkAmbientBackground(ctx, CANONICAL_W, CANONICAL_H);
+          }
+        };
+
+        transDef.render(ctx, CANONICAL_W, CANONICAL_H, transProgress, renderFrom, renderTo);
+      } else {
+        renderLayerContent(ctx, layer, layerRelTime, layerProgress, currentTime, CANONICAL_W, CANONICAL_H, assets);
+      }
+    } else {
+      renderLayerContent(ctx, layer, layerRelTime, layerProgress, currentTime, CANONICAL_W, CANONICAL_H, assets);
     }
 
     // Apply post-draw layer effects
@@ -117,6 +142,37 @@ export function renderFrame(
   ctx.restore();
 }
 
+function renderLayerContent(
+  ctx: CanvasRenderingContext2D,
+  layer: Layer,
+  layerRelTime: number,
+  layerProgress: number,
+  currentTime: number,
+  canvasW: number,
+  canvasH: number,
+  assets: AssetCache
+) {
+  switch (layer.type) {
+    case 'video':
+      renderVideoLayer(ctx, layer, layerRelTime, canvasW, canvasH, assets);
+      break;
+    case 'image':
+      renderImageLayer(ctx, layer, layerProgress, canvasW, canvasH, assets);
+      break;
+    case 'shape':
+      renderShapeLayer(ctx, layer, canvasW, canvasH);
+      break;
+    case 'text':
+      renderTextLayer(ctx, layer, layerRelTime, canvasW, canvasH);
+      break;
+    case 'caption':
+      renderCaptionLayer(ctx, layer, currentTime, canvasW, canvasH);
+      break;
+    default:
+      break;
+  }
+}
+
 function renderVideoLayer(
   ctx: CanvasRenderingContext2D,
   layer: VideoLayer,
@@ -127,7 +183,7 @@ function renderVideoLayer(
 ) {
   const video = assets.videos.get(layer.src);
   if (!video || video.readyState < 2) {
-    drawProceduralVideoPlaceholder(ctx, layer.name, canvasW, canvasH);
+    drawDarkAmbientBackground(ctx, canvasW, canvasH);
     return;
   }
 
@@ -168,7 +224,7 @@ function renderVideoLayer(
   try {
     ctx.drawImage(video, offsetX, offsetY, drawW, drawH);
   } catch {
-    drawProceduralVideoPlaceholder(ctx, layer.name, canvasW, canvasH);
+    drawDarkAmbientBackground(ctx, canvasW, canvasH);
   }
 }
 
@@ -181,121 +237,131 @@ function renderImageLayer(
   assets: AssetCache
 ) {
   const img = assets.images.get(layer.src);
-  if (!img || !img.complete) {
-    drawProceduralVideoPlaceholder(ctx, layer.name, canvasW, canvasH);
+  if (!img || !img.complete || img.naturalWidth === 0) {
+    drawDarkAmbientBackground(ctx, canvasW, canvasH);
     return;
   }
 
-  let scale = 1;
-  let panX = 0;
-  let panY = 0;
-
-  if (layer.kenBurns?.enabled) {
-    const kb = layer.kenBurns;
-    scale = kb.startScale + (kb.endScale - kb.startScale) * progress;
-    panX = (kb.startX + (kb.endX - kb.startX) * progress) * canvasW;
-    panY = (kb.startY + (kb.endY - kb.startY) * progress) * canvasH;
-  }
-
-  const iw = img.naturalWidth || 1080;
-  const ih = img.naturalHeight || 1920;
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
   const imgAspect = iw / ih;
   const canvasAspect = canvasW / canvasH;
 
-  let drawW = canvasW * scale;
-  let drawH = canvasH * scale;
-  if (imgAspect > canvasAspect) {
-    drawH = canvasH * scale;
-    drawW = (canvasH * imgAspect) * scale;
+  let drawW = canvasW;
+  let drawH = canvasH;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (layer.fitMode === 'contain') {
+    if (imgAspect > canvasAspect) {
+      drawW = canvasW;
+      drawH = canvasW / imgAspect;
+      offsetY = (canvasH - drawH) / 2;
+    } else {
+      drawH = canvasH;
+      drawW = canvasH * imgAspect;
+      offsetX = (canvasW - drawW) / 2;
+    }
   } else {
-    drawW = canvasW * scale;
-    drawH = (canvasW / imgAspect) * scale;
+    if (imgAspect > canvasAspect) {
+      drawH = canvasH;
+      drawW = canvasH * imgAspect;
+      offsetX = (canvasW - drawW) / 2;
+    } else {
+      drawW = canvasW;
+      drawH = canvasW / imgAspect;
+      offsetY = (canvasH - drawH) / 2;
+    }
   }
 
-  const posX = (canvasW - drawW) / 2 + panX;
-  const posY = (canvasH - drawH) / 2 + panY;
-
-  try {
-    ctx.drawImage(img, posX, posY, drawW, drawH);
-  } catch {
-    drawProceduralVideoPlaceholder(ctx, layer.name, canvasW, canvasH);
+  // Ken Burns subtle zoom animation
+  if (layer.animation === 'zoom-in') {
+    const scale = 1 + progress * 0.08;
+    ctx.save();
+    ctx.translate(canvasW / 2, canvasH / 2);
+    ctx.scale(scale, scale);
+    ctx.translate(-canvasW / 2, -canvasH / 2);
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+    ctx.restore();
+  } else if (layer.animation === 'zoom-out') {
+    const scale = 1.08 - progress * 0.08;
+    ctx.save();
+    ctx.translate(canvasW / 2, canvasH / 2);
+    ctx.scale(scale, scale);
+    ctx.translate(-canvasW / 2, -canvasH / 2);
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
   }
 }
 
 function renderShapeLayer(ctx: CanvasRenderingContext2D, layer: ShapeLayer, canvasW: number, canvasH: number) {
-  const x = (canvasW - layer.width) / 2;
-  const y = (canvasH - layer.height) / 2;
-  ctx.save();
-  ctx.fillStyle = layer.color;
-  if (layer.strokeColor && layer.strokeWidth) {
-    ctx.strokeStyle = layer.strokeColor;
-    ctx.lineWidth = layer.strokeWidth;
-  }
+  const x = (canvasW / 2) + (layer.position?.x ?? 0);
+  const y = (canvasH / 2) + (layer.position?.y ?? 0);
+  const w = layer.width ?? 300;
+  const h = layer.height ?? 300;
 
-  if (layer.shapeType === 'rect') {
+  ctx.save();
+  ctx.fillStyle = layer.fillColor || '#8B5CF6';
+
+  if (layer.shapeType === 'circle') {
     ctx.beginPath();
-    ctx.roundRect(x, y, layer.width, layer.height, layer.borderRadius ?? 0);
+    ctx.arc(x, y, w / 2, 0, Math.PI * 2);
     ctx.fill();
-    if (layer.strokeColor) ctx.stroke();
-  } else if (layer.shapeType === 'circle') {
+    if (layer.strokeColor && layer.strokeWidth) {
+      ctx.strokeStyle = layer.strokeColor;
+      ctx.lineWidth = layer.strokeWidth;
+      ctx.stroke();
+    }
+  } else {
+    const radius = layer.borderRadius || 0;
     ctx.beginPath();
-    ctx.arc(canvasW / 2, canvasH / 2, Math.min(layer.width, layer.height) / 2, 0, Math.PI * 2);
+    ctx.roundRect(x - w / 2, y - h / 2, w, h, radius);
     ctx.fill();
-    if (layer.strokeColor) ctx.stroke();
+    if (layer.strokeColor && layer.strokeWidth) {
+      ctx.strokeStyle = layer.strokeColor;
+      ctx.lineWidth = layer.strokeWidth;
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
 
 function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTime: number, canvasW: number, canvasH: number) {
+  const x = (canvasW / 2) + (layer.position?.x ?? 0);
+  const y = (canvasH / 2) + (layer.position?.y ?? 0);
+
   ctx.save();
-  let renderedText = layer.text;
-  let textOpacity = 1;
-  let textScale = 1;
-  let textOffsetX = 0;
-  let textOffsetY = 0;
-
-  if (layer.animationId) {
-    const animDef = Registry.getTextAnimation(layer.animationId);
-    if (animDef) {
-      const animDur = layer.animationDuration ?? 0.5;
-      const progress = Math.max(0, Math.min(1, relTime / animDur));
-      const animRes = animDef.apply(ctx, progress, layer.text, layer.fontSize);
-      renderedText = animRes.renderedText;
-      textOpacity = animRes.opacity;
-      textScale = animRes.scale;
-      textOffsetX = animRes.offsetX;
-      textOffsetY = animRes.offsetY;
-      if (animRes.blurRadius && animRes.blurRadius > 0) {
-        ctx.filter = `blur(${animRes.blurRadius}px)`;
-      }
-    }
-  }
-
-  ctx.globalAlpha *= textOpacity;
-  const x = canvasW / 2 + textOffsetX;
-  const y = canvasH / 2 + textOffsetY;
-
-  ctx.translate(x, y);
-  if (textScale !== 1) ctx.scale(textScale, textScale);
-  ctx.translate(-x, -y);
-
-  ctx.font = `${layer.fontWeight ?? '800'} ${layer.fontSize}px ${layer.fontFamily}`;
-  ctx.textAlign = layer.textAlign ?? 'center';
+  ctx.font = `${layer.fontWeight || '700'} ${layer.fontSize}px ${layer.fontFamily || 'Inter, sans-serif'}`;
+  ctx.textAlign = (layer.textAlign as CanvasTextAlign) || 'center';
   ctx.textBaseline = 'middle';
 
+  const animDef = Registry.getTextAnimation(layer.animationId || 'fade-in');
+  let renderedText = layer.text;
+
+  if (animDef) {
+    const animProgress = Math.max(0, Math.min(1, relTime / (layer.animationDuration || 0.4)));
+    animDef.apply(ctx, animProgress, layer.text, x, y, layer.fontSize);
+  }
+
+  // Draw background badge if configured
   if (layer.backgroundColor) {
     const metrics = ctx.measureText(renderedText);
-    const pad = layer.backgroundPadding ?? 16;
-    const bw = metrics.width + pad * 2;
-    const bh = layer.fontSize + pad * 1.5;
+    const pad = layer.backgroundPadding || 12;
+    const rad = layer.backgroundRadius || 8;
+    const bgW = metrics.width + pad * 2;
+    const bgH = layer.fontSize * 1.35 + pad;
+
     ctx.save();
     ctx.fillStyle = layer.backgroundColor;
     ctx.beginPath();
-    ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, layer.backgroundRadius ?? 12);
+    ctx.roundRect(x - bgW / 2, y - bgH / 2, bgW, bgH, rad);
     ctx.fill();
     ctx.restore();
   }
 
+  // Text Stroke
   if (layer.strokeColor && layer.strokeWidth) {
     ctx.lineJoin = 'round';
     ctx.miterLimit = 2;
@@ -313,7 +379,8 @@ function renderCaptionLayer(ctx: CanvasRenderingContext2D, layer: CaptionLayer, 
   const activeChunk = layer.chunks.find(c => currentTime >= c.start && currentTime <= c.end);
   if (!activeChunk) return;
 
-  const styleDef = Registry.getCaptionStyle(layer.styleId) || Registry.getCaptionStyle('karaoke-word-highlight');
+  const styleDef =
+    Registry.getCaptionStyle(layer.styleId) || Registry.getCaptionStyle('karaoke-word-highlight');
   if (!styleDef) return;
 
   styleDef.render(
@@ -330,25 +397,19 @@ function renderCaptionLayer(ctx: CanvasRenderingContext2D, layer: CaptionLayer, 
   );
 }
 
-function drawProceduralVideoPlaceholder(ctx: CanvasRenderingContext2D, title: string, width: number, height: number) {
+function drawDarkAmbientBackground(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.save();
   const grad = ctx.createLinearGradient(0, 0, width, height);
-  grad.addColorStop(0, '#13131F');
-  grad.addColorStop(0.5, '#1B142D');
-  grad.addColorStop(1, '#0B0B14');
+  grad.addColorStop(0, '#0F0F17');
+  grad.addColorStop(0.5, '#161326');
+  grad.addColorStop(1, '#0B0B10');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.strokeStyle = 'rgba(139, 92, 246, 0.15)';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(139, 92, 246, 0.08)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(width / 2, height / 2, 140, 0, Math.PI * 2);
+  ctx.arc(width / 2, height / 2, 160, 0, Math.PI * 2);
   ctx.stroke();
-
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.font = '700 32px Inter, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(title || 'Reelix B-Roll Track', width / 2, height / 2);
   ctx.restore();
 }
