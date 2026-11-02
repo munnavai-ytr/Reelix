@@ -339,10 +339,18 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
 
   const animDef = Registry.getTextAnimation(layer.animationId || 'fade-in');
   let renderedText = layer.text;
+  let renderX = x;
+  let renderY = y;
 
   if (animDef) {
     const animProgress = Math.max(0, Math.min(1, relTime / (layer.animationDuration || 0.4)));
-    animDef.apply(ctx, animProgress, layer.text, x, y, layer.fontSize);
+    const animResult = animDef.apply(ctx, animProgress, layer.text, layer.fontSize);
+    renderedText = animResult.renderedText;
+    renderX += animResult.offsetX || 0;
+    renderY += animResult.offsetY || 0;
+    if (animResult.opacity !== undefined) {
+      ctx.globalAlpha *= animResult.opacity;
+    }
   }
 
   // Draw background badge if configured
@@ -356,7 +364,7 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
     ctx.save();
     ctx.fillStyle = layer.backgroundColor;
     ctx.beginPath();
-    ctx.roundRect(x - bgW / 2, y - bgH / 2, bgW, bgH, rad);
+    ctx.roundRect(renderX - bgW / 2, renderY - bgH / 2, bgW, bgH, rad);
     ctx.fill();
     ctx.restore();
   }
@@ -367,11 +375,11 @@ function renderTextLayer(ctx: CanvasRenderingContext2D, layer: TextLayer, relTim
     ctx.miterLimit = 2;
     ctx.strokeStyle = layer.strokeColor;
     ctx.lineWidth = layer.strokeWidth;
-    ctx.strokeText(renderedText, x, y);
+    ctx.strokeText(renderedText, renderX, renderY);
   }
 
   ctx.fillStyle = layer.color;
-  ctx.fillText(renderedText, x, y);
+  ctx.fillText(renderedText, renderX, renderY);
   ctx.restore();
 }
 

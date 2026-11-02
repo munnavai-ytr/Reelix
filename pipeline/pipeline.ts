@@ -4,12 +4,13 @@ import { ingestMediaInputs } from './ingest';
 import { transcribeAudio } from '../ai/whisper';
 import { analyzeVideoClipsWithGemini } from '../ai/clip-analysis';
 import { generateDirectorPlan } from '../ai/director';
-import { resolveStockVideos, resolveBackgroundMusic } from './assets';
+import { resolveStockVideos, resolveBackgroundMusic, resolveSfx } from './assets';
 import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { AssetCache } from '../engine/renderer';
 import { ensureAssets } from '../engine/media';
 import { ApiKeysService } from '../storage/keys';
 import { OpfsService } from '../storage/opfs';
+import { ProjectDb } from '../storage/db';
 
 export interface GenerateShortsOptions {
   audioFile?: File | Blob;
@@ -82,6 +83,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
   let transcription;
   let finalDuration = ingested.audioDuration;
   let finalVoiceUrl = ingested.audioUrl;
+  let finalVoiceUri = ingested.audioUri || ingested.audioUrl;
 
   try {
     transcription = await transcribeAudio(
@@ -96,9 +98,11 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
       try {
         const filename = `voice_compacted_${Date.now()}.wav`;
         const uri = await OpfsService.writeFile(filename, transcription.processedBlob);
+        finalVoiceUri = uri;
         finalVoiceUrl = await OpfsService.resolveToBlobUrl(uri);
       } catch {
         finalVoiceUrl = URL.createObjectURL(transcription.processedBlob);
+        finalVoiceUri = finalVoiceUrl;
       }
     }
   } catch (err: unknown) {
@@ -148,9 +152,14 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
       {
         script: opts.scriptText || transcription.text,
         voiceUrl: finalVoiceUrl,
+        voiceUri: finalVoiceUri,
         voiceDuration: finalDuration,
         userVideoUrls: ingested.videoUrls,
+        userVideoUris: ingested.videoUris,
         userImageUrls: ingested.imageUrls,
+        userImageUris: ingested.imageUris,
+        musicUrl: ingested.musicUrl,
+        musicUri: ingested.musicUri,
         clipAnalysis,
         mode: ingested.isTalkingHead ? 'talking-head' : 'broll',
         niche: opts.niche,
@@ -205,11 +214,29 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
       if (ingested.musicUrl) {
         musicLayer.src = ingested.musicUrl;
       } else {
-        const bgMusicUrl = await resolveBackgroundMusic(
-          opts.style === 'Viral High Energy' ? 'hype' : 'upbeat',
-          plan.duration
-        );
+        const mood = directorResult.musicMood || (opts.style === 'Viral High Energy' ? 'hype' : 'upbeat');
+        const bgMusicUrl = await resolveBackgroundMusic(mood, plan.duration);
         musicLayer.src = bgMusicUrl;
+      }
+    }
+
+    // Resolve SFX audio layers (swishes, impacts, risers, cut whooshes)
+    const sfxLayers = plan.layers.filter(
+      (l) => l.type === 'audio' && (l as AudioLayer).audioType === 'sfx'
+    ) as AudioLayer[];
+
+    if (sfxLayers.length > 0) {
+      const typesToResolve = sfxLayers.map((l) => l.name || 'whoosh');
+      try {
+        const resolvedMap = await resolveSfx(typesToResolve);
+        for (const l of sfxLayers) {
+          const type = l.name || 'whoosh';
+          if (!l.src || l.src.startsWith('sfx:')) {
+            l.src = resolvedMap[type] || resolvedMap['whoosh'] || '';
+          }
+        }
+      } catch (e) {
+        console.warn('[Pipeline] SFX resolve failed:', e);
       }
     }
   } catch (err: unknown) {

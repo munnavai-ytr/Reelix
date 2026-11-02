@@ -5,7 +5,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useStudioStore } from '@/engine/store';
 import { renderFrame } from '@/engine/renderer';
 import { AudioMixer } from '@/engine/audio-mixer';
-import { syncPreviewVideos } from '@/engine/media';
+import { syncPreviewVideos, ensureWindow } from '@/engine/media';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Repeat } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import { BRAND } from '@/ui/brand';
@@ -26,6 +26,7 @@ export function PreviewCanvas() {
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
+  const lastWindowCheckRef = useRef<number>(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
   const [proxyResolution, setProxyResolution] = useState<'proxy' | 'full'>('proxy');
@@ -124,6 +125,11 @@ export function PreviewCanvas() {
 
       setCurrentTime(nextTime);
       drawCurrentFrame(nextTime);
+
+      if (now - lastWindowCheckRef.current > 500) {
+        lastWindowCheckRef.current = now;
+        ensureWindow(currentPlan, assets, nextTime).catch(() => {});
+      }
 
       animFrameRef.current = requestAnimationFrame(loop);
     };

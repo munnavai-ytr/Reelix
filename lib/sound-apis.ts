@@ -34,10 +34,10 @@ export class SoundApisService {
       throw new Error(`Freesound API returned ${res.status}: ${res.statusText}`);
     }
 
-    const data = await res.json();
+    const data: any = await res.json();
     const results: SoundSearchResult[] = [];
 
-    if (data.results && Array.isArray(data.results)) {
+    if (data && data.results && Array.isArray(data.results)) {
       for (const item of data.results) {
         const previewUrl = item.previews?.['preview-hq-mp3'] || item.previews?.['preview-lq-mp3'];
         if (previewUrl) {
@@ -81,7 +81,7 @@ export class SoundApisService {
       throw new Error(`Jamendo API returned ${res.status}: ${res.statusText}`);
     }
 
-    const data = await res.json();
+    const data: any = await res.json();
     const results: SoundSearchResult[] = [];
 
     if (data.results && Array.isArray(data.results)) {

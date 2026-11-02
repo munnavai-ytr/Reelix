@@ -1,9 +1,8 @@
-// Robust WebCodecs + mp4-muxer Exporter with Codec Probing, Audio Track Encoding, Backpressure, Screen WakeLock, and Native Capacitor File Sharing
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { EditPlan, AudioLayer } from '../engine/types';
+import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { renderFrame, AssetCache } from '../engine/renderer';
 import { computeAudioDuckingVolume } from '../engine/timeline';
-import { resolveSrc, seekVideosForExport } from '../engine/media';
+import { resolveSrc, seekVideosForExport, ensureWindow } from '../engine/media';
 import { Logger } from '../storage/logger';
 
 export interface ExportProgress {
@@ -21,12 +20,31 @@ export interface ExportOptions {
   bitrate?: number;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMsg)), ms);
+  });
+  return Promise.race([
+    promise.then((val) => {
+      clearTimeout(timer);
+      return val;
+    }),
+    timeoutPromise,
+  ]);
+}
+
 export async function exportVideoMp4(
   plan: EditPlan,
   assets: AssetCache,
   onProgress: (p: ExportProgress) => void,
   options: ExportOptions = {}
 ): Promise<Blob> {
+  const hasWebCodecs = typeof window !== 'undefined' && 'VideoEncoder' in window && 'VideoFrame' in window;
+  if (!hasWebCodecs) {
+    throw new Error('This device cannot export video (WebCodecs missing). Use Chrome or an updated Android WebView.');
+  }
+
   const width = options.width || 1080;
   const height = options.height || 1920;
   const fps = options.fps || 30;
@@ -68,24 +86,12 @@ export async function exportVideoMp4(
   };
 
   try {
-    const hasWebCodecs = typeof window !== 'undefined' && 'VideoEncoder' in window && 'VideoFrame' in window;
-
-    if (hasWebCodecs) {
-      try {
-        const result = await exportViaWebCodecs(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
-        cleanupExport();
-        return result;
-      } catch (err) {
-        console.warn('WebCodecs export failed, attempting MediaRecorder fallback:', err);
-        Logger.logError('exportVideoMp4 [WebCodecs Fallback]', err);
-      }
-    }
-
-    const fallbackResult = await exportViaMediaRecorder(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
+    const result = await exportViaWebCodecs(plan, canvas, ctx, assets, width, height, fps, bitrate, totalFrames, onProgress);
     cleanupExport();
-    return fallbackResult;
+    return result;
   } catch (err) {
     cleanupExport();
+    Logger.logError('exportVideoMp4 [WebCodecs Error]', err);
     throw err;
   }
 }
@@ -231,191 +237,154 @@ async function exportViaWebCodecs(
     fastStart: 'in-memory',
   });
 
-  if (canEncodeAudio && mixedAudioBuffer) {
-    const audioEncoder = new AudioEncoder({
-      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-      error: (e) => console.warn('AudioEncoder error:', e),
-    });
-    audioEncoder.configure({
-      codec: 'mp4a.40.2',
-      numberOfChannels: 2,
-      sampleRate: 48000,
-      bitrate: 128000,
-    });
+  let audioEncoder: AudioEncoder | null = null;
+  let videoEncoder: VideoEncoder | null = null;
+  let encoderError: Error | null = null;
 
-    const sampleRate = 48000;
-    const totalSamples = mixedAudioBuffer.length;
-    const chunkSize = 1024;
-    const left = mixedAudioBuffer.getChannelData(0);
-    const right = mixedAudioBuffer.numberOfChannels > 1 ? mixedAudioBuffer.getChannelData(1) : left;
-
-    for (let offset = 0; offset < totalSamples; offset += chunkSize) {
-      const currentChunkSize = Math.min(chunkSize, totalSamples - offset);
-      const chunkData = new Float32Array(currentChunkSize * 2);
-      for (let i = 0; i < currentChunkSize; i++) {
-        chunkData[i] = left[offset + i];
-        chunkData[currentChunkSize + i] = right[offset + i];
-      }
-      const timestamp = Math.round((offset / sampleRate) * 1_000_000);
-      const audioData = new AudioData({
-        format: 'f32-planar',
-        sampleRate,
-        numberOfFrames: currentChunkSize,
-        numberOfChannels: 2,
-        timestamp,
-        data: chunkData,
+  try {
+    if (canEncodeAudio && mixedAudioBuffer) {
+      audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+        error: (e) => console.warn('AudioEncoder error:', e),
       });
-      audioEncoder.encode(audioData);
-      audioData.close();
+      audioEncoder.configure({
+        codec: 'mp4a.40.2',
+        numberOfChannels: 2,
+        sampleRate: 48000,
+        bitrate: 128000,
+      });
+
+      const sampleRate = 48000;
+      const totalSamples = mixedAudioBuffer.length;
+      const chunkSize = 1024;
+      const left = mixedAudioBuffer.getChannelData(0);
+      const right = mixedAudioBuffer.numberOfChannels > 1 ? mixedAudioBuffer.getChannelData(1) : left;
+
+      for (let offset = 0; offset < totalSamples; offset += chunkSize) {
+        const currentChunkSize = Math.min(chunkSize, totalSamples - offset);
+        const chunkData = new Float32Array(currentChunkSize * 2);
+        for (let i = 0; i < currentChunkSize; i++) {
+          chunkData[i] = left[offset + i];
+          chunkData[currentChunkSize + i] = right[offset + i];
+        }
+        const timestamp = Math.round((offset / sampleRate) * 1_000_000);
+        const audioData = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: currentChunkSize,
+          numberOfChannels: 2,
+          timestamp,
+          data: chunkData,
+        });
+        audioEncoder.encode(audioData);
+        audioData.close();
+      }
+
+      await withTimeout(audioEncoder.flush(), 60000, 'Audio encoder flush timed out after 60s');
     }
 
-    await audioEncoder.flush();
-    audioEncoder.close();
-  }
+    videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => {
+        console.error('VideoEncoder error:', e);
+        encoderError = e;
+      },
+    });
 
-  let encoderError: Error | null = null;
-  const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (e) => {
-      console.error('VideoEncoder error:', e);
-      encoderError = e;
-    },
-  });
+    videoEncoder.configure({
+      codec: chosenCodec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+    });
 
-  videoEncoder.configure({
-    codec: chosenCodec,
-    width,
-    height,
-    bitrate,
-    framerate: fps,
-  });
+    // Ensure assets for initial frame window
+    await ensureWindow(plan, assets, 0);
 
-  const renderStartMs = performance.now();
+    const renderStartMs = performance.now();
 
-  for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+    for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+      if (encoderError) {
+        throw encoderError;
+      }
+
+      while (videoEncoder.encodeQueueSize > 6) {
+        await new Promise((r) => setTimeout(r, 16));
+      }
+
+      const t = frameIdx / fps;
+
+      // When t enters a video layer that is not yet loaded in assets, await ensureWindow
+      const activeVideo = plan.layers.find(
+        (l) => l.type === 'video' && (l as VideoLayer).src && t >= l.startTime && t < l.startTime + l.duration
+      ) as VideoLayer | undefined;
+
+      if (activeVideo && !assets.videos.has(activeVideo.src)) {
+        await ensureWindow(plan, assets, t);
+      }
+
+      await seekVideosForExport(plan, t, assets);
+      renderFrame(ctx, plan, t, width, height, assets);
+
+      const timestampMicros = Math.round(t * 1_000_000);
+      const frameDurationMicros = Math.round(1_000_000 / fps);
+      const videoFrame = new VideoFrame(canvas, {
+        timestamp: timestampMicros,
+        duration: frameDurationMicros,
+      });
+      // Keyframe every 2 seconds
+      const isKeyFrame = frameIdx % (fps * 2) === 0;
+
+      videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
+      videoFrame.close();
+
+      const elapsedSec = (performance.now() - renderStartMs) / 1000;
+      const measuredFps = (frameIdx + 1) / Math.max(0.001, elapsedSec);
+      const estimatedSecRemaining = Math.max(0, Math.ceil((totalFrames - frameIdx - 1) / Math.max(1, measuredFps)));
+
+      const pct = Math.floor(10 + (frameIdx / totalFrames) * 82);
+      onProgress({
+        percentage: pct,
+        currentFrame: frameIdx,
+        totalFrames,
+        phase: 'rendering',
+        estimatedSecRemaining,
+      });
+
+      if (frameIdx % 15 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+
     if (encoderError) {
       throw encoderError;
     }
 
-    while (videoEncoder.encodeQueueSize > 6) {
-      await new Promise((r) => setTimeout(r, 16));
-    }
-
-    const t = frameIdx / fps;
-    await seekVideosForExport(plan, t, assets);
-    renderFrame(ctx, plan, t, width, height, assets);
-
-    const timestampMicros = Math.round(t * 1_000_000);
-    const videoFrame = new VideoFrame(canvas, { timestamp: timestampMicros });
-    const isKeyFrame = frameIdx % 60 === 0;
-
-    videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
-    videoFrame.close();
-
-    const elapsedSec = (performance.now() - renderStartMs) / 1000;
-    const measuredFps = (frameIdx + 1) / Math.max(0.001, elapsedSec);
-    const estimatedSecRemaining = Math.max(0, Math.ceil((totalFrames - frameIdx - 1) / Math.max(1, measuredFps)));
-
-    const pct = Math.floor(10 + (frameIdx / totalFrames) * 82);
     onProgress({
-      percentage: pct,
-      currentFrame: frameIdx,
+      percentage: 95,
+      currentFrame: totalFrames,
       totalFrames,
-      phase: 'rendering',
-      estimatedSecRemaining,
+      phase: 'muxing',
     });
 
-    if (frameIdx % 15 === 0) {
-      await new Promise((r) => setTimeout(r, 0));
+    await withTimeout(videoEncoder.flush(), 60000, 'Video encoder flush timed out after 60s');
+
+    muxer.finalize();
+    const buffer = target.buffer;
+    return new Blob([buffer], { type: chosenCodec.startsWith('vp') ? 'video/webm' : 'video/mp4' });
+  } finally {
+    if (audioEncoder && (audioEncoder as unknown as { state?: string }).state !== 'closed') {
+      try {
+        audioEncoder.close();
+      } catch {}
+    }
+    if (videoEncoder && (videoEncoder as unknown as { state?: string }).state !== 'closed') {
+      try {
+        videoEncoder.close();
+      } catch {}
     }
   }
-
-  onProgress({
-    percentage: 95,
-    currentFrame: totalFrames,
-    totalFrames,
-    phase: 'muxing',
-  });
-
-  await videoEncoder.flush();
-  videoEncoder.close();
-
-  muxer.finalize();
-  const buffer = target.buffer;
-  return new Blob([buffer], { type: chosenCodec.startsWith('vp') ? 'video/webm' : 'video/mp4' });
-}
-
-async function exportViaMediaRecorder(
-  plan: EditPlan,
-  canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D,
-  assets: AssetCache,
-  width: number,
-  height: number,
-  fps: number,
-  bitrate: number,
-  totalFrames: number,
-  onProgress: (p: ExportProgress) => void
-): Promise<Blob> {
-  const stream = canvas.captureStream(fps);
-  const chunks: Blob[] = [];
-
-  const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
-    ? 'video/mp4;codecs=avc1'
-    : MediaRecorder.isTypeSupported('video/mp4')
-    ? 'video/mp4'
-    : 'video/webm;codecs=vp9';
-
-  const recorder = new MediaRecorder(stream, {
-    mimeType,
-    videoBitsPerSecond: bitrate,
-  });
-
-  recorder.ondataavailable = (e) => {
-    if (e.data.size > 0) chunks.push(e.data);
-  };
-
-  const recordingFinished = new Promise<Blob>((resolve) => {
-    recorder.onstop = () => {
-      resolve(new Blob(chunks, { type: mimeType }));
-    };
-  });
-
-  recorder.start();
-  const renderStartMs = performance.now();
-
-  for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
-    const t = frameIdx / fps;
-    await seekVideosForExport(plan, t, assets);
-    renderFrame(ctx, plan, t, width, height, assets);
-
-    const elapsedSec = (performance.now() - renderStartMs) / 1000;
-    const measuredFps = (frameIdx + 1) / Math.max(0.001, elapsedSec);
-    const estimatedSecRemaining = Math.max(0, Math.ceil((totalFrames - frameIdx - 1) / Math.max(1, measuredFps)));
-
-    const pct = Math.floor((frameIdx / totalFrames) * 95);
-    onProgress({
-      percentage: pct,
-      currentFrame: frameIdx,
-      totalFrames,
-      phase: 'rendering',
-      estimatedSecRemaining,
-    });
-
-    await new Promise((r) => setTimeout(r, 1000 / fps));
-  }
-
-  recorder.stop();
-  const resultBlob = await recordingFinished;
-
-  onProgress({
-    percentage: 100,
-    currentFrame: totalFrames,
-    totalFrames,
-    phase: 'complete',
-  });
-
-  return resultBlob;
 }
 
 export async function downloadOrShareVideo(blob: Blob, filename: string): Promise<void> {

@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { EditPlan, Layer, VideoLayer } from './types';
 import { AssetCache } from './renderer';
-import { ensureAssets } from './media';
+import { ensureAssets, ensureWindow, releaseAllBlobUrls } from './media';
 import { PipelineProgressEvent } from '../pipeline/types';
 import { ExportProgress } from '../pipeline/exporter';
 import { ProjectDb } from '../storage/db';
@@ -72,6 +72,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   showOnboarding: false,
 
   setPlan: (plan) => {
+    releaseAllBlobUrls();
     set({
       currentPlan: plan,
       currentTime: 0,
@@ -80,6 +81,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
       selectedLayerId: plan.layers[0]?.id || null,
     });
+
+    ensureWindow(plan, get().assets, 0)
+      .then(() => {
+        set({ assetVersion: get().assetVersion + 1 });
+      })
+      .catch(() => {});
 
     ensureAssets(plan, get().assets, () => {
       set({ assetVersion: get().assetVersion + 1 });

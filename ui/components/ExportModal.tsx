@@ -39,6 +39,10 @@ export function ExportModal() {
     const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
     return ((devMem !== undefined && devMem <= 4) || !!isNative) ? '720x1280' : '1080x1920';
   });
+  const [fpsPreset, setFpsPreset] = useState<30 | 60>(30);
+  const [qualityPreset, setQualityPreset] = useState<'high' | 'medium' | 'draft'>('medium');
+  const [includeWatermark, setIncludeWatermark] = useState(false);
+  const abortControllerRef = useRef(false);
 
   if (!isExporting || !currentPlan) return null;
 

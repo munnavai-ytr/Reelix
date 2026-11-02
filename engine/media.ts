@@ -47,6 +47,17 @@ export function releaseAssetCache(cache: AssetCache): void {
   cache.images.clear();
 }
 
+export function releaseAllBlobUrls(): void {
+  for (const [, url] of objectUrlMap.entries()) {
+    if (url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }
+  }
+  objectUrlMap.clear();
+}
+
 export function layerVideoTime(l: VideoLayer, t: number, video?: HTMLVideoElement): number {
   const trimIn = l.trimIn || 0;
   const elapsed = t - l.startTime;
@@ -55,7 +66,7 @@ export function layerVideoTime(l: VideoLayer, t: number, video?: HTMLVideoElemen
     if (l.loop) {
       target = trimIn + (elapsed % Math.max(0.1, video.duration - trimIn));
     } else {
-      target = Math.min(target, Math.max(0, video.duration - 0.05));
+      target = Math.min(target, Math.max(0, video.duration - 0.04));
     }
   }
   return Math.max(0, target);
@@ -99,6 +110,34 @@ function createVideoElement(srcUrl: string): Promise<HTMLVideoElement> {
     v.addEventListener('canplay', onLoaded);
     v.addEventListener('error', onError);
   });
+}
+
+export async function ensureWindow(plan: EditPlan, assets: AssetCache, t: number, lookAhead = 6): Promise<void> {
+  const need = new Map<string, VideoLayer>();
+  for (const l of plan.layers) {
+    if (l.type !== 'video' || !(l as VideoLayer).src) continue;
+    if (l.startTime <= t + lookAhead && l.startTime + l.duration >= t - 1) need.set((l as VideoLayer).src, l as VideoLayer);
+  }
+  // unload videos not needed (pause, removeAttribute('src'), load()) but keep at most 3 alive
+  for (const [k, v] of Array.from(assets.videos.entries())) {
+    if (!need.has(k)) {
+      try {
+        v.pause();
+        v.removeAttribute('src');
+        v.load();
+      } catch {}
+      assets.videos.delete(k);
+    }
+  }
+  await Promise.all(
+    Array.from(need.keys())
+      .filter((k) => !assets.videos.has(k))
+      .map(async (k) => {
+        const url = await resolveSrc(k);
+        const v = await createVideoElement(url);
+        assets.videos.set(k, v);
+      })
+  );
 }
 
 /**
@@ -154,9 +193,6 @@ export async function ensureAssets(
         if (!resolved) return;
         const v = await createVideoElement(resolved);
         cache.videos.set(srcKey, v);
-        if (resolved !== srcKey) {
-          cache.videos.set(resolved, v);
-        }
         newLoadedCount++;
         onChange?.();
       })();
@@ -263,7 +299,9 @@ export async function seekVideosForExport(
         const video = assets.videos.get(layer.src);
         if (video) {
           const targetTime = layerVideoTime(layer, currentTime, video);
-          if (Math.abs(video.currentTime - targetTime) > 0.03) {
+          const isFirstFrame = Math.abs(currentTime - layer.startTime) < 0.035;
+          const driftThreshold = isFirstFrame ? 0.001 : 0.03;
+          if (Math.abs(video.currentTime - targetTime) > driftThreshold) {
             promises.push(
               new Promise<void>((resolve) => {
                 const onSeeked = () => {
@@ -273,7 +311,7 @@ export async function seekVideosForExport(
                 const timer = setTimeout(() => {
                   cleanup();
                   resolve();
-                }, 250);
+                }, 3000);
                 const cleanup = () => {
                   video.removeEventListener('seeked', onSeeked);
                   clearTimeout(timer);

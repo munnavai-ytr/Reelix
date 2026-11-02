@@ -68,7 +68,8 @@ export class AudioMixer {
 
       let buffer = this.audioBuffers.get(layer.src);
       if (!buffer) {
-        buffer = await this.loadAudio(layer.src);
+        const loaded = await this.loadAudio(layer.src);
+        if (loaded) buffer = loaded;
       }
       if (!buffer) continue;
 
@@ -124,5 +125,18 @@ export class AudioMixer {
     }
     this.activeNodes.clear();
     this.isPlaying = false;
+  }
+
+  async close(): Promise<void> {
+    this.stopAll();
+    if (this.ctx) {
+      try {
+        await this.ctx.close();
+      } catch {
+        // ignore
+      }
+      this.ctx = null;
+    }
+    this.audioBuffers.clear();
   }
 }

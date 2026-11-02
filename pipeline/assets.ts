@@ -103,24 +103,110 @@ export async function resolveBackgroundMusic(mood: string, duration: number): Pr
   }
 }
 
-export async function resolveSoundEffects(sfxTypes: string[]): Promise<Record<string, string>> {
-  const mixer = new AudioMixer();
-  await mixer.init();
-  const map: Record<string, string> = {};
+import { OpfsService } from '../storage/opfs';
+import { encode16BitWav } from '../ai/whisper';
+import { SoundApisService } from '../lib/sound-apis';
 
-  for (const sfx of sfxTypes) {
-    const norm = sfx.toLowerCase().includes('pop') ? 'pop' :
-                 sfx.toLowerCase().includes('hit') ? 'hit' :
-                 sfx.toLowerCase().includes('ding') ? 'ding' : 'whoosh';
-    const buffer = await mixer.generateProceduralSfx(norm);
-    if (buffer) {
-      const blob = audioBufferToWav(buffer);
-      map[sfx] = URL.createObjectURL(blob);
+export function synthesizeProceduralSfx(type: 'whoosh' | 'pop' | 'hit' | 'ding'): Blob {
+  const sampleRate = 44100;
+  const norm = type.toLowerCase();
+  let duration = 0.45;
+  if (norm === 'pop') duration = 0.08;
+  else if (norm === 'hit') duration = 0.35;
+  else if (norm === 'ding') duration = 0.7;
+
+  const totalSamples = Math.floor(sampleRate * duration);
+  const pcm = new Float32Array(totalSamples);
+
+  if (norm === 'whoosh') {
+    // Filtered white noise with bell curve amplitude
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      const progress = t / duration;
+      const env = Math.sin(Math.PI * progress);
+      const noise = (Math.random() * 2 - 1) * 0.4;
+      const tone = Math.sin(2 * Math.PI * (250 + 400 * Math.sin(Math.PI * progress)) * t) * 0.25;
+      pcm[i] = (noise + tone) * env;
+    }
+  } else if (norm === 'pop') {
+    // Fast sine drop 800Hz -> 80Hz
+    let phase = 0;
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      const freq = 80 + 720 * Math.exp(-t * 45);
+      phase += (2 * Math.PI * freq) / sampleRate;
+      const env = Math.exp(-t * 30);
+      pcm[i] = Math.sin(phase) * env * 0.7;
+    }
+  } else if (norm === 'hit') {
+    // Low punch 150Hz -> 45Hz with short transient
+    let phase = 0;
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      const freq = 45 + 105 * Math.exp(-t * 20);
+      phase += (2 * Math.PI * freq) / sampleRate;
+      const transient = t < 0.025 ? (Math.random() * 2 - 1) * 0.35 : 0;
+      const env = Math.exp(-t * 9);
+      pcm[i] = (Math.sin(phase) * 0.65 + transient) * env;
+    }
+  } else {
+    // 'ding': crystalline bell chime
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      const env = Math.exp(-t * 5.5);
+      const f1 = Math.sin(2 * Math.PI * 1760 * t) * 0.5;
+      const f2 = Math.sin(2 * Math.PI * 3520 * t) * 0.25;
+      pcm[i] = (f1 + f2) * env;
+    }
+  }
+
+  const wavBuf = encode16BitWav(pcm, sampleRate);
+  return new Blob([wavBuf], { type: 'audio/wav' });
+}
+
+export async function resolveSfx(sfxTypes: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  const uniqueTypes = Array.from(new Set(sfxTypes.map(s => s.toLowerCase())));
+
+  const keys = ApiKeysService.getKeys();
+  const hasFreesound = keys.freesound && keys.freesound.trim().length > 5;
+
+  for (const rawType of uniqueTypes) {
+    const norm: 'whoosh' | 'pop' | 'hit' | 'ding' =
+      rawType.includes('pop') ? 'pop' :
+      rawType.includes('hit') ? 'hit' :
+      rawType.includes('ding') ? 'ding' : 'whoosh';
+
+    if (map[rawType]) continue;
+
+    // Try Freesound CC0 if key is present
+    if (hasFreesound) {
+      try {
+        const results = await SoundApisService.searchFreesound(norm, true);
+        if (results && results[0]?.previewUrl) {
+          map[rawType] = results[0].previewUrl;
+          continue;
+        }
+      } catch {
+        // Fall back to built-in procedural SFX
+      }
+    }
+
+    // Synthesize procedural SFX and write to local OPFS
+    try {
+      const blob = synthesizeProceduralSfx(norm);
+      const filename = `sfx_${norm}.wav`;
+      const uri = await OpfsService.writeFile(filename, blob);
+      map[rawType] = uri;
+    } catch {
+      map[rawType] = '';
     }
   }
 
   return map;
 }
+
+export const resolveSoundEffects = resolveSfx;
 
 function audioBufferToWav(buffer: AudioBuffer): Blob {
   const numOfChan = buffer.numberOfChannels;

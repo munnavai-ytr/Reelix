@@ -45,6 +45,91 @@ export function TimelineEditor() {
     initialDuration: number;
   } | null>(null);
 
+  const totalDuration = currentPlan?.duration || 30;
+  const pxPerSec = 40 * zoomLevel;
+  const timelineContentWidth = 72 + Math.ceil(totalDuration) * pxPerSec + 100;
+
+  const handleTimelineScrub = useCallback((clientX: number) => {
+    if (!timelineContainerRef.current) return;
+    const rect = timelineContainerRef.current.getBoundingClientRect();
+    const scrollLeft = timelineContainerRef.current.scrollLeft;
+    const clickX = clientX - rect.left + scrollLeft - 72;
+    const newTime = Math.max(0, Math.min(totalDuration, clickX / pxPerSec));
+    setCurrentTime(newTime);
+  }, [totalDuration, pxPerSec, setCurrentTime]);
+
+  const handleMouseDownScrub = (e: React.MouseEvent) => {
+    setIsDraggingPlayhead(true);
+    handleTimelineScrub(e.clientX);
+  };
+
+  const handleTrimStart = (e: React.MouseEvent, layerId: string, edge: 'start' | 'end') => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!currentPlan) return;
+    const layer = currentPlan.layers.find((l) => l.id === layerId);
+    if (!layer) return;
+    setTrimmingState({
+      layerId,
+      edge,
+      startX: e.clientX,
+      initialStart: layer.startTime,
+      initialDuration: layer.duration,
+    });
+  };
+
+  const lanes = [
+    {
+      id: 'video',
+      label: 'Video',
+      icon: VideoIcon,
+      color: LAYER_COLORS.video,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'video'),
+    },
+    {
+      id: 'voice',
+      label: 'Voice',
+      icon: Mic,
+      color: LAYER_COLORS.voice,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'audio' && (l as any).audioType === 'voiceover'),
+    },
+    {
+      id: 'captions',
+      label: 'Captions',
+      icon: MessageSquare,
+      color: LAYER_COLORS.captions,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'caption'),
+    },
+    {
+      id: 'music',
+      label: 'Music',
+      icon: Music,
+      color: LAYER_COLORS.music,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'audio' && (l as any).audioType === 'music'),
+    },
+    {
+      id: 'sfx',
+      label: 'SFX',
+      icon: Zap,
+      color: LAYER_COLORS.sfx,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'audio' && (l as any).audioType === 'sfx'),
+    },
+    {
+      id: 'text',
+      label: 'Text',
+      icon: Type,
+      color: LAYER_COLORS.text,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'text'),
+    },
+    {
+      id: 'images',
+      label: 'Images',
+      icon: Layers,
+      color: LAYER_COLORS.images,
+      layers: (currentPlan?.layers || []).filter((l) => l.type === 'image'),
+    },
+  ];
+
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;

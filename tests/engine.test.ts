@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { detectSilences, compactSpeechAudio, alignScriptToDuration } from '../ai/whisper';
 import { isLayerActive, interpolateKeyframe, computeAudioDuckingVolume } from '../engine/timeline';
 import { layerVideoTime } from '../engine/media';
-import { Layer, AudioLayer, VideoLayer } from '../engine/types';
+import { Layer, AudioLayer, VideoLayer, CaptionChunk } from '../engine/types';
+import { repairDirectorScenes, assembleFullEditPlan, RawAiScene } from '../ai/director';
+import { DirectorRequest } from '../ai/types';
+import { Registry } from '../registry';
 
 test('detectSilences identifies speech vs silence windows correctly', () => {
   const sampleRate = 16000;
@@ -79,6 +82,10 @@ test('isLayerActive computes temporal overlap accurately', () => {
     trackIndex: 0,
     startTime: 2.0,
     duration: 5.0,
+    src: 'opfs://test.mp4',
+    trimIn: 0,
+    trimOut: 0,
+    volume: 1.0,
   };
 
   assert.equal(isLayerActive(layer, 1.0), false);
@@ -113,6 +120,7 @@ test('computeAudioDuckingVolume applies keyframes, fades, and auto-ducking', () 
     trackIndex: 5,
     startTime: 0,
     duration: 10,
+    src: 'opfs://bgm.mp3',
     volume: 1.0,
     fadeIn: 2.0,
     fadeOut: 2.0,
@@ -132,6 +140,7 @@ test('computeAudioDuckingVolume applies keyframes, fades, and auto-ducking', () 
     trackIndex: 4,
     startTime: 3.0,
     duration: 4.0,
+    src: 'opfs://voice.wav',
     volume: 1.0,
   };
 
@@ -155,7 +164,10 @@ test('layerVideoTime computes trim and loop offsets correctly', () => {
     trackIndex: 0,
     startTime: 2.0,
     duration: 6.0,
+    src: 'opfs://video.mp4',
     trimIn: 1.5,
+    trimOut: 0,
+    volume: 1.0,
   };
 
   // At t = 3.0s, elapsed = 1.0s -> target = 1.5 + 1.0 = 2.5s
@@ -168,4 +180,157 @@ test('layerVideoTime computes trim and loop offsets correctly', () => {
   // Elapsed 2.0s -> trim 1.5 + 2.0 = 3.5s >= duration 3.0s -> loop offset
   const videoTime = layerVideoTime(loopingLayer, 4.0, mockVideo);
   assert.ok(videoTime >= 0 && videoTime < 3.0, 'Looping video time must stay within video duration');
+});
+
+test('repairDirectorScenes guarantees strict 0..D tiling with no gaps or overlaps', () => {
+  const totalDuration = 18.0;
+  const rawScenes: RawAiScene[] = [
+    { start: 0.5, end: 1.0, effect: 'zoom-in' }, // short scene (<1.2s)
+    { start: 2.0, end: 10.0, effect: 'invalid-effect' }, // gap before it, and long (>5.5s)
+    { start: 12.0, end: 15.0, effect: 'color-grade' },
+  ];
+  const clipsMeta = [{ duration: 120.0 }];
+
+  const repaired = repairDirectorScenes(rawScenes, totalDuration, clipsMeta, 0, 'broll');
+
+  assert.ok(repaired.length > 0, 'Repaired scenes must not be empty');
+  assert.equal(repaired[0].start, 0, 'First scene must start at 0');
+  assert.equal(repaired[repaired.length - 1].end, totalDuration, 'Last scene must end at totalDuration');
+
+  // Verify contiguous tiling
+  for (let i = 0; i < repaired.length - 1; i++) {
+    assert.equal(
+      repaired[i].end,
+      repaired[i + 1].start,
+      `Scene ${i} end (${repaired[i].end}) must exactly equal scene ${i + 1} start (${repaired[i + 1].start})`
+    );
+  }
+
+  // Verify scene duration bounds (min >= 1.2s, max <= 5.5s)
+  for (const sc of repaired) {
+    assert.ok(
+      sc.duration >= 1.19,
+      `Scene duration ${sc.duration}s should be >= 1.2s (or bounded by total duration)`
+    );
+    assert.ok(
+      sc.duration <= 5.51,
+      `Scene duration ${sc.duration}s should be <= 5.5s`
+    );
+  }
+});
+
+test('repairDirectorScenes walks cursor through 120s clip and wraps correctly', () => {
+  const totalDuration = 20.0;
+  // Multiple scenes referencing clip 0
+  const rawScenes: RawAiScene[] = [
+    { start: 0, end: 3.5, clipIndex: 0 },
+    { start: 3.5, end: 7.0, clipIndex: 0 },
+    { start: 7.0, end: 10.5, clipIndex: 0 },
+    { start: 10.5, end: 14.0, clipIndex: 0 },
+    { start: 14.0, end: 20.0, clipIndex: 0 },
+  ];
+  const clipsMeta = [{ duration: 120.0 }];
+
+  const repaired = repairDirectorScenes(rawScenes, totalDuration, clipsMeta, 0, 'broll');
+
+  let previousClipStart = -1;
+  for (const sc of repaired) {
+    assert.equal(sc.clipIndex, 0);
+    assert.ok(
+      sc.clipStart >= previousClipStart,
+      `Clip cursor should advance forward through clip: previous=${previousClipStart}, current=${sc.clipStart}`
+    );
+    assert.ok(
+      sc.clipStart + sc.duration <= 120.0,
+      `Clip trim range [${sc.clipStart}, ${sc.clipStart + sc.duration}] must stay within 120s clip duration`
+    );
+    previousClipStart = sc.clipStart;
+  }
+});
+
+test('repairDirectorScenes handles 20s clip looping smoothly', () => {
+  const totalDuration = 35.0; // Needs to loop 20s clip
+  const clipsMeta = [{ duration: 20.0 }];
+
+  // Provide empty scenes to trigger full automatic timeline tiling
+  const repaired = repairDirectorScenes([], totalDuration, clipsMeta, 0, 'broll');
+
+  assert.equal(repaired[0].start, 0);
+  assert.equal(repaired[repaired.length - 1].end, totalDuration);
+
+  for (const sc of repaired) {
+    assert.ok(
+      sc.clipStart + sc.duration <= 20.05,
+      `Scene clip range [${sc.clipStart}, ${sc.clipStart + sc.duration}] must not exceed 20s clip duration`
+    );
+  }
+});
+
+test('repairDirectorScenes gracefully repairs invalid AI output (bad indices and invalid effects)', () => {
+  const totalDuration = 10.0;
+  const rawScenes: RawAiScene[] = [
+    { start: 0, end: 5.0, clipIndex: 999, imageIndex: 999, effect: 'hallucinated-effect', transition: 'hallucinated-transition' },
+    { start: 5.0, end: 10.0, clipIndex: -5, effect: 'non-existent', transition: 'fake' },
+  ];
+  const clipsMeta = [{ duration: 15.0 }];
+
+  const repaired = repairDirectorScenes(rawScenes, totalDuration, clipsMeta, 1, 'broll');
+
+  for (const sc of repaired) {
+    assert.ok(sc.clipIndex >= 0 && sc.clipIndex < clipsMeta.length, 'Clip index must be clamped within bounds');
+    assert.ok(Registry.getEffect(sc.effect) !== undefined, `Effect "${sc.effect}" must be valid registry effect`);
+    if (sc.transition) {
+      assert.ok(Registry.getTransition(sc.transition) !== undefined, `Transition "${sc.transition}" must be valid registry transition`);
+    }
+  }
+});
+
+test('assembleFullEditPlan with OPFS URIs produces a plan containing zero blob URLs and handles missing niche/style', () => {
+  const req: DirectorRequest = {
+    script: 'Check out this awesome Reelix vertical video editing workflow.',
+    voiceUrl: 'blob:http://localhost:3000/temp-voice',
+    voiceUri: 'opfs://voice_1700000000.wav',
+    voiceDuration: 15.0,
+    userVideoUrls: ['blob:http://localhost:3000/temp-clip-0'],
+    userVideoUris: ['opfs://clip_0.mp4'],
+    userImageUrls: ['blob:http://localhost:3000/temp-img-0'],
+    userImageUris: ['opfs://img_0.png'],
+    musicUrl: 'blob:http://localhost:3000/temp-music',
+    musicUri: 'opfs://soundtrack.mp3',
+    // intentionally omit niche and style to test Bug 1 fix
+  };
+
+  const captionChunks: CaptionChunk[] = [
+    { text: 'Check out this', start: 0, end: 1.5, words: [{ word: 'Check', start: 0, end: 0.5 }, { word: 'out', start: 0.5, end: 1.0 }, { word: 'this', start: 1.0, end: 1.5 }] },
+    { text: 'awesome Reelix', start: 1.5, end: 3.0, words: [{ word: 'awesome', start: 1.5, end: 2.2 }, { word: 'Reelix', start: 2.2, end: 3.0 }] },
+  ];
+
+  const rawAiPlan = {
+    title: 'Awesome Reelix Demo',
+    scenes: [
+      { start: 0, end: 7.5, clipIndex: 0, effect: 'zoom-in' },
+      { start: 7.5, end: 15.0, clipIndex: 0, effect: 'color-grade' },
+    ],
+  };
+
+  const result = assembleFullEditPlan(rawAiPlan, req, 15.0, captionChunks, 'karaoke-word-highlight', []);
+  const planJson = JSON.stringify(result.editPlan);
+
+  assert.ok(result.editPlan.layers.length > 0, 'Edit plan must contain layers');
+  assert.ok(!planJson.includes('blob:'), 'Persisted EditPlan must not contain any transient blob: URLs');
+
+  // Verify voice layer has opfs uri
+  const voiceLayer = result.editPlan.layers.find((l) => l.type === 'audio' && (l as AudioLayer).audioType === 'voiceover') as AudioLayer;
+  assert.ok(voiceLayer, 'Must have voiceover layer');
+  assert.equal(voiceLayer.src, 'opfs://voice_1700000000.wav');
+
+  // Verify video layer has opfs uri
+  const videoLayer = result.editPlan.layers.find((l) => l.type === 'video') as VideoLayer;
+  assert.ok(videoLayer, 'Must have video layer');
+  assert.equal(videoLayer.src, 'opfs://clip_0.mp4');
+
+  // Verify music layer has opfs uri
+  const musicLayer = result.editPlan.layers.find((l) => l.type === 'audio' && (l as AudioLayer).audioType === 'music') as AudioLayer;
+  assert.ok(musicLayer, 'Must have music layer');
+  assert.equal(musicLayer.src, 'opfs://soundtrack.mp3');
 });

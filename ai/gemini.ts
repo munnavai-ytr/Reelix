@@ -7,6 +7,8 @@ import { resolveTextModel, invalidateModelCache } from './models';
 export interface GeminiCallOptions {
   model?: string;
   maxRetries?: number;
+  temperature?: number;
+  kind?: string;
 }
 
 export interface GeminiCandidate {

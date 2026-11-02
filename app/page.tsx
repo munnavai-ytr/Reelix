@@ -60,17 +60,16 @@ export default function StudioPage() {
           const state = useStudioStore.getState();
           if (
             state.exportProgress &&
-            state.exportProgress.step !== 'done' &&
-            state.exportProgress.step !== 'error'
+            state.exportProgress.phase !== 'complete'
           ) {
             return;
           }
-          if (state.isExportModalOpen) {
-            state.setExportModalOpen(false);
+          if (state.isExporting) {
+            state.setIsExporting(false);
             return;
           }
-          if (state.isSettingsOpen) {
-            state.setSettingsOpen(false);
+          if (state.activeTab === 'settings') {
+            state.setActiveTab('home');
             return;
           }
           if (mobileActiveTool) {

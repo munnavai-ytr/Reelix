@@ -76,14 +76,18 @@ export interface VideoLayer extends BaseLayer {
   trimOut: number;
   volume: number;
   speed?: number;
+  loop?: boolean;
   fitMode?: 'cover' | 'contain';
   focusPoint?: { x: number; y: number }; // 0-1 normalized focal point for 9:16 reframe
+  transitionIn?: { type: string; duration: number };
 }
 
 export interface ImageLayer extends BaseLayer {
   type: 'image';
   src: string;
   fitMode?: 'cover' | 'contain';
+  animation?: 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right';
+  transitionIn?: { type: string; duration: number };
   kenBurns?: {
     enabled: boolean;
     startScale: number;
@@ -98,6 +102,7 @@ export interface ImageLayer extends BaseLayer {
 export interface TextLayer extends BaseLayer {
   type: 'text';
   text: string;
+  position?: { x: number; y: number };
   fontSize: number;
   fontFamily: string;
   fontWeight?: string;
@@ -130,7 +135,9 @@ export interface ShapeLayer extends BaseLayer {
   shapeType: 'rect' | 'circle' | 'pill' | 'badge' | 'line';
   width: number;
   height: number;
-  color: string;
+  color?: string;
+  fillColor?: string;
+  position?: { x: number; y: number };
   strokeColor?: string;
   strokeWidth?: number;
   borderRadius?: number;
@@ -170,15 +177,20 @@ export interface Marker {
 export interface EditPlan {
   id: string;
   title: string;
-  version: '1.0.0';
-  aspectRatio: '9:16';
-  width: 1080;
-  height: 1920;
-  fps: 30;
+  version?: '1.0.0';
+  aspectRatio?: '9:16';
+  width?: 1080;
+  height?: 1920;
+  fps: number;
   duration: number; // in seconds
   layers: Layer[];
-  transitions: Transition[];
-  markers: Marker[];
+  transitions?: Transition[];
+  markers?: Marker[];
+  canvas?: {
+    width: number;
+    height: number;
+    backgroundColor: string;
+  };
   metadata: {
     createdAt: number;
     updatedAt: number;
@@ -187,5 +199,6 @@ export interface EditPlan {
     targetDuration?: number;
     script?: string;
     voiceName?: string;
+    directorNotes?: string;
   };
 }

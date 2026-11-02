@@ -117,7 +117,7 @@ export function EditCopilot({ isDocked = false, onClose }: EditCopilotProps) {
 
       recognition.onstart = () => {
         setIsRecording(true);
-        triggerHaptic('selection');
+        triggerHaptic('light');
       };
 
       recognition.onresult = (event: any) => {
