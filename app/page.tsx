@@ -93,6 +93,70 @@ export default function StudioPage() {
     };
   }, [mobileActiveTool]);
 
+  // Desktop Keyboard Shortcuts Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore key events when typing inside inputs or textareas
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const store = useStudioStore.getState();
+      if (store.activeTab !== 'editor' || !store.currentPlan) return;
+
+      // Space: Play / Pause
+      if (e.code === 'Space') {
+        e.preventDefault();
+        store.setIsPlaying(!store.isPlaying);
+        return;
+      }
+
+      // S / s: Split layer at playhead
+      if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.metaKey && store.selectedLayerId) {
+          e.preventDefault();
+          store.splitLayerAtPlayhead(store.selectedLayerId);
+          return;
+        }
+      }
+
+      // Delete / Backspace: Delete selected layer
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (store.selectedLayerId) {
+          e.preventDefault();
+          store.deleteLayer(store.selectedLayerId);
+          return;
+        }
+      }
+
+      // Undo / Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          store.redo();
+        } else {
+          store.undo();
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        store.redo();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Mobile Bottom Toolbar Items
   const mobileToolbarItems = [
     { id: 'edit', label: STRINGS.studio.toolbar.edit, icon: Sliders },

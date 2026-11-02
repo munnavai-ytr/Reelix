@@ -9,8 +9,8 @@ import { Download, Share2, Sparkles, X, CheckCircle2, Film, Shield, Zap } from '
 import confetti from 'canvas-confetti';
 import { triggerHaptic } from '@/storage/haptics';
 import { BrandKitService } from '@/storage/brand-kit';
-import { GamificationService } from '@/storage/gamification';
 import { toast } from './Toast';
+import { BRAND } from '@/ui/brand';
 
 export function ExportModal() {
   const {
@@ -33,16 +33,31 @@ export function ExportModal() {
     const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
     return (devMem !== undefined && devMem <= 4) || !!isNative;
   });
-  const [resolutionPreset, setResolutionPreset] = useState<'1080x1920' | '720x1280'>(() => {
-    if (typeof window === 'undefined') return '1080x1920';
-    const isNative = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
-    const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
-    return ((devMem !== undefined && devMem <= 4) || !!isNative) ? '720x1280' : '1080x1920';
-  });
+  const [exportPreset, setExportPreset] = useState<'standard' | 'hq' | 'small'>('standard');
+  const [resolutionPreset, setResolutionPreset] = useState<'1080x1920' | '720x1280'>('1080x1920');
   const [fpsPreset, setFpsPreset] = useState<30 | 60>(30);
   const [qualityPreset, setQualityPreset] = useState<'high' | 'medium' | 'draft'>('medium');
   const [includeWatermark, setIncludeWatermark] = useState(false);
+  const [watermarkCorner, setWatermarkCorner] = useState<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'>('bottom-right');
   const abortControllerRef = useRef(false);
+
+  const applyExportPreset = (preset: 'standard' | 'hq' | 'small') => {
+    triggerHaptic('light');
+    setExportPreset(preset);
+    if (preset === 'standard') {
+      setResolutionPreset('1080x1920');
+      setFpsPreset(30);
+      setQualityPreset('medium');
+    } else if (preset === 'hq') {
+      setResolutionPreset('1080x1920');
+      setFpsPreset(60);
+      setQualityPreset('high');
+    } else if (preset === 'small') {
+      setResolutionPreset('720x1280');
+      setFpsPreset(30);
+      setQualityPreset('draft');
+    }
+  };
 
   if (!isExporting || !currentPlan) return null;
 
@@ -60,20 +75,39 @@ export function ExportModal() {
       // Add watermark layer if enabled
       if (includeWatermark) {
         const brand = BrandKitService.getSettings();
+        const watermarkText = brand.watermarkText || BRAND.appName;
+        const [w, h] = resolutionPreset === '720x1280' ? [720, 1280] : [1080, 1920];
+        
+        let wx = w / 2 - 140;
+        let wy = h / 2 - 120;
+        if (watermarkCorner === 'top-left') {
+          wx = -w / 2 + 140;
+          wy = -h / 2 + 80;
+        } else if (watermarkCorner === 'top-right') {
+          wx = w / 2 - 140;
+          wy = -h / 2 + 80;
+        } else if (watermarkCorner === 'bottom-left') {
+          wx = -w / 2 + 140;
+          wy = h / 2 - 120;
+        } else {
+          wx = w / 2 - 140;
+          wy = h / 2 - 120;
+        }
+
         clonedPlan.layers.push({
           id: 'brand-watermark',
           type: 'text',
-          name: brand.watermarkText || 'Reelix',
+          name: watermarkText,
           startTime: 0,
           duration: clonedPlan.duration,
-          text: brand.watermarkText || 'Reelix',
-          fontSize: 28,
+          text: watermarkText,
+          fontSize: resolutionPreset === '720x1280' ? 22 : 28,
           fontFamily: brand.defaultFontFamily || 'Inter, sans-serif',
           fontWeight: '900',
           color: 'rgba(255, 255, 255, 0.75)',
           transform: {
-            x: 360,
-            y: -860,
+            x: wx,
+            y: wy,
             scale: 1,
             rotation: 0,
             opacity: brand.watermarkOpacity || 0.8,
@@ -107,10 +141,7 @@ export function ExportModal() {
 
       setExportedBlob(blob);
       setDownloadUrl(URL.createObjectURL(blob));
-      setIsProcessing(false);
       triggerHaptic('success');
-
-      GamificationService.recordAction('export_video');
 
       confetti({
         particleCount: 90,
@@ -180,73 +211,76 @@ export function ExportModal() {
           <div className="space-y-3">
             <div>
               <label className="text-[11px] font-semibold text-white/60 mb-1.5 block">
-                Resolution & Frame Rate
+                Export Preset
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { res: '1080x1920', fps: 30, label: '1080p 30fps' },
-                  { res: '1080x1920', fps: 60, label: '1080p 60fps' },
-                  { res: '720x1280', fps: 30, label: '720p 30fps' },
-                ].map((p, idx) => {
-                  const active = resolutionPreset === p.res && fpsPreset === p.fps;
+                  { id: 'standard', title: 'Shorts / Reels', sub: '1080p · 30fps' },
+                  { id: 'hq', title: 'High Quality', sub: '1080p · 60fps' },
+                  { id: 'small', title: 'Small File', sub: '720p · 30fps' },
+                ].map((p) => {
+                  const active = exportPreset === p.id;
                   return (
                     <button
-                      key={idx}
+                      key={p.id}
                       type="button"
-                      onClick={() => {
-                        setResolutionPreset(p.res as any);
-                        setFpsPreset(p.fps as any);
-                      }}
-                      className={`p-2 rounded-xl text-xs font-semibold border transition-all ${
+                      onClick={() => applyExportPreset(p.id as any)}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
                         active
                           ? 'bg-violet-600/30 border-violet-500 text-white'
                           : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10'
                       }`}
                     >
-                      {p.label}
+                      <div className="text-xs font-bold leading-tight">{p.title}</div>
+                      <div className="text-[10px] text-cyan-300 font-mono mt-0.5">{p.sub}</div>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            <div>
-              <label className="text-[11px] font-semibold text-white/60 mb-1.5 block">
-                Encoding Quality / Bitrate
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'high', label: 'High (12 Mbps)' },
-                  { id: 'medium', label: 'Mid (8 Mbps)' },
-                  { id: 'draft', label: 'Draft (4 Mbps)' },
-                ].map((q) => (
-                  <button
-                    key={q.id}
-                    type="button"
-                    onClick={() => setQualityPreset(q.id as any)}
-                    className={`p-2 rounded-xl text-[11px] font-semibold border transition-all ${
-                      qualityPreset === q.id
-                        ? 'bg-cyan-600/30 border-cyan-500 text-white'
-                        : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10'
-                    }`}
-                  >
-                    {q.label}
-                  </button>
-                ))}
+            <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-violet-400" />
+                  <span className="text-xs text-white">Include Brand Watermark</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={includeWatermark}
+                  onChange={(e) => setIncludeWatermark(e.target.checked)}
+                  className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
+                />
               </div>
-            </div>
 
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/5">
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-violet-400" />
-                <span className="text-xs text-white">Include Brand Watermark</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={includeWatermark}
-                onChange={(e) => setIncludeWatermark(e.target.checked)}
-                className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
-              />
+              {includeWatermark && (
+                <div className="pt-2 border-t border-white/5 space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-medium block">
+                    Watermark Position (Corner)
+                  </label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { id: 'top-left', label: 'Top-L' },
+                      { id: 'top-right', label: 'Top-R' },
+                      { id: 'bottom-left', label: 'Bottom-L' },
+                      { id: 'bottom-right', label: 'Bottom-R' },
+                    ].map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setWatermarkCorner(c.id as any)}
+                        className={`py-1 rounded-lg text-[10px] font-semibold border transition-all ${
+                          watermarkCorner === c.id
+                            ? 'bg-cyan-600/30 border-cyan-500 text-white'
+                            : 'bg-white/5 border-white/5 text-white/60 hover:bg-white/10'
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

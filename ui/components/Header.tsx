@@ -3,12 +3,13 @@
 
 import React, { useState } from 'react';
 import { useStudioStore } from '@/engine/store';
-import { Undo2, Redo2, Download, Sliders, Sparkles, Film } from 'lucide-react';
+import { Undo2, Redo2, Download, Sliders, Sparkles, Check, RefreshCw } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import { BRAND } from '@/ui/brand';
-import { STRINGS } from '@/ui/strings';
+import { useStrings } from '@/ui/strings';
 
 export function Header() {
+  const strings = useStrings();
   const {
     currentPlan,
     setPlan,
@@ -19,6 +20,8 @@ export function Header() {
     activeTab,
     setActiveTab,
     setIsExporting,
+    saveStatus,
+    lastSavedTime,
   } = useStudioStore();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -34,6 +37,8 @@ export function Header() {
     }
   };
 
+  const LogoComponent = BRAND.logo;
+
   return (
     <header className="h-14 sm:h-16 px-3 sm:px-6 flex items-center justify-between border-b border-[#26263A] bg-[#0A0A10]/90 backdrop-blur-xl sticky top-0 z-40">
       {/* Brand Zone */}
@@ -44,10 +49,11 @@ export function Header() {
             triggerHaptic('light');
             setActiveTab('home');
           }}
-          className="flex items-center gap-2 group text-left shrink-0"
+          className="flex items-center gap-2.5 group text-left shrink-0"
+          aria-label={BRAND.appName}
         >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl brand-gradient flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform">
-            <Film className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform">
+            <LogoComponent className="w-7 h-7 sm:w-8 sm:h-8" />
           </div>
           <div>
             <span className="font-extrabold text-base sm:text-lg tracking-tight brand-gradient-text font-bricolage">
@@ -56,9 +62,9 @@ export function Header() {
           </div>
         </button>
 
-        {/* Project Title (Inline Editable in Editor) */}
+        {/* Project Title & Autosave Indicator */}
         {currentPlan && activeTab === 'editor' && (
-          <div className="flex items-center gap-2 ml-2 sm:ml-4 pl-2 sm:pl-4 border-l border-[#26263A] text-xs text-[#8D8DA8] min-w-0">
+          <div className="flex items-center gap-2.5 ml-2 sm:ml-4 pl-2 sm:pl-4 border-l border-[#26263A] text-xs text-[#8D8DA8] min-w-0">
             {isEditingTitle ? (
               <input
                 type="text"
@@ -76,11 +82,28 @@ export function Header() {
                   setIsEditingTitle(true);
                 }}
                 title="Click to rename"
-                className="text-white font-medium truncate max-w-[120px] sm:max-w-[200px] hover:text-cyan-300 cursor-pointer transition-colors"
+                className="text-white font-medium truncate max-w-[120px] sm:max-w-[180px] hover:text-cyan-300 cursor-pointer transition-colors"
               >
-                {currentPlan.title || STRINGS.studio.defaultProjectTitle}
+                {currentPlan.title || strings.studio.defaultProjectTitle}
               </span>
             )}
+
+            {/* Autosave badge with time */}
+            {saveStatus === 'saving' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 font-mono">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                <span className="hidden sm:inline">{strings.studio.saving}</span>
+              </span>
+            )}
+            {saveStatus === 'saved' && lastSavedTime && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-mono" title={`Last saved at ${new Date(lastSavedTime).toLocaleTimeString()}`}>
+                <Check className="w-3 h-3" />
+                <span className="hidden sm:inline">
+                  {strings.studio.saved} {new Date(lastSavedTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              </span>
+            )}
+
             <span className="font-mono text-cyan-400 hidden sm:inline">
               {currentPlan.duration.toFixed(1)}s
             </span>
@@ -95,7 +118,7 @@ export function Header() {
             type="button"
             onClick={undo}
             disabled={!canUndo}
-            title={`${STRINGS.studio.undo} (Ctrl+Z)`}
+            title={`${strings.studio.undo} (Ctrl+Z)`}
             className="p-1.5 rounded-lg text-[#8D8DA8] hover:text-white disabled:opacity-30 disabled:hover:text-[#8D8DA8] transition-colors touch-target"
           >
             <Undo2 className="w-4 h-4" />
@@ -104,7 +127,7 @@ export function Header() {
             type="button"
             onClick={redo}
             disabled={!canRedo}
-            title={`${STRINGS.studio.redo} (Ctrl+Y)`}
+            title={`${strings.studio.redo} (Ctrl+Y)`}
             className="p-1.5 rounded-lg text-[#8D8DA8] hover:text-white disabled:opacity-30 disabled:hover:text-[#8D8DA8] transition-colors touch-target"
           >
             <Redo2 className="w-4 h-4" />
@@ -124,7 +147,7 @@ export function Header() {
             className="px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold brand-gradient text-white flex items-center gap-1.5 shadow-lg shadow-violet-500/25 hover:opacity-95 active:scale-95 transition-all touch-target"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{STRINGS.studio.exportButton}</span>
+            <span>{strings.studio.exportButton}</span>
           </button>
         )}
 

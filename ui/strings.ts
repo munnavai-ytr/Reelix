@@ -1,7 +1,14 @@
-// Centralized UI Strings for Reelix
-// Edit this file to customize labels, copy, internationalization, or white-labeling
+// Centralized UI Strings with Full English (en) and Bangla (bn) Localization
+'use client';
 
-export const STRINGS = {
+import { create } from 'zustand';
+import { BRAND } from './brand';
+
+export type Language = 'en' | 'bn';
+
+export const STRINGS_EN = {
+  appName: BRAND.appName,
+  tagline: BRAND.tagline,
   nav: {
     home: 'Home',
     create: 'Create',
@@ -37,15 +44,67 @@ export const STRINGS = {
       },
     ],
   },
+  onboarding: {
+    step1Title: `Welcome to ${BRAND.appName}`,
+    step1Subtitle: `The professional on-device vertical video studio. Create viral 1080×1920 Shorts in seconds.`,
+    benefits: [
+      {
+        title: 'Edits strictly to your voice',
+        desc: 'Matches cuts, zoom punches, and visual hooks directly to your spoken rhythm.',
+      },
+      {
+        title: 'Instant silence removal',
+        desc: 'Removes 20ms dead air pauses without clicks or pops, keeping pace razor-sharp.',
+      },
+      {
+        title: 'Captions in Bangla & English',
+        desc: 'Word-by-word highlighted captions with Bengali script font support.',
+      },
+    ],
+    step2Title: 'Gemini API Setup',
+    step2Subtitle: 'Keys stay 100% on your device. Only speech audio and video frames are sent to Google AI for analysis.',
+    geminiKeyLabel: 'Google AI Studio API Key (Free tier supported)',
+    geminiKeyPlaceholder: 'AIzaSy...',
+    testKeyButton: 'Test Key Live',
+    testingKey: 'Testing key...',
+    keyTestedSuccess: 'Gemini API key is active and ready!',
+    keyTestedFail: 'Could not connect. Check your key and network.',
+    getFreeKey: 'Get a free Gemini API Key →',
+    addLaterTitle: 'Optional Keys (Add later in Settings)',
+    optionalKeys: [
+      { name: 'Pexels API', unlocks: 'Unlocks automatic HD vertical stock b-roll clips' },
+      { name: 'Jamendo API', unlocks: 'Unlocks royalty-free background music tracks' },
+      { name: 'Freesound API', unlocks: 'Unlocks thousands of CC0 sound effects' },
+    ],
+    step3Title: 'Quick Studio Tour',
+    step3Subtitle: 'Master the 3 core tools to edit viral shorts effortlessly:',
+    coachMarks: [
+      { title: '1. Create Wizard', desc: 'Upload voice or video, choose a preset, and hit Generate Short.' },
+      { title: '2. Multi-track Timeline', desc: 'Precise frame scrubbing, non-destructive trims, and instant playback.' },
+      { title: '3. Edit Copilot', desc: 'Type natural instructions like "make captions yellow" to mutate layers.' },
+    ],
+    skip: 'Skip Tour',
+    continue: 'Continue',
+    startCreating: 'Start Creating',
+  },
   create: {
     title: 'Create Vertical Short',
     badge: '1080×1920 · 9:16',
     subtitle: 'Upload voice or video, optional media/music, and describe your edit.',
+    apiKeyNotice: 'Gemini API key is not configured. Speech transcription and Director AI will use offline mode.',
+    configureKey: 'Configure Key',
     steps: {
       media: 'Media',
       describe: 'Describe',
       studio: 'Studio',
     },
+    presetsRowTitle: 'Edit Style Presets',
+    presets: [
+      { id: 'viral-hype', label: 'Viral Hype', desc: 'Fast zooms, punch-ins, hype music' },
+      { id: 'calm-cinematic', label: 'Calm Cinematic', desc: 'Slow pan, film glow, ambient sound' },
+      { id: 'clean-explainer', label: 'Clean Explainer', desc: 'Clear cuts, highlight captions, lofi' },
+      { id: 'news-flash', label: 'News Flash', desc: 'Urgent hooks, lower-thirds, dramatic' },
+    ],
     voiceCard: {
       title: 'Your Voice',
       requiredBadge: 'REQUIRED',
@@ -110,12 +169,16 @@ export const STRINGS = {
     exportButton: 'Export 1080p',
     undo: 'Undo',
     redo: 'Redo',
+    saved: 'Saved',
+    saving: 'Saving...',
     defaultProjectTitle: 'Untitled Short',
     previewBadge: '1080p',
     hookBadge: 'Hook',
     mute: 'Mute Audio',
     unmute: 'Unmute Audio',
     loop: 'Loop Playback',
+    backupProject: 'Backup Project (.reelix)',
+    restoreProject: 'Restore Project',
     timeline: {
       lanes: {
         video: 'Video',
@@ -152,6 +215,29 @@ export const STRINGS = {
     retryAction: 'Retry',
     recentChanges: 'Recent Changes',
   },
+  export: {
+    title: 'Export Vertical Video',
+    subtitle: 'Render high-speed MP4 directly inside your browser with WebCodecs hardware encoding.',
+    presetsTitle: 'Export Presets',
+    presets: {
+      standard: { title: 'Shorts / Reels / TikTok', desc: '1080×1920 · 30 fps · 8 Mbps' },
+      hq: { title: 'High Quality', desc: '1080×1920 · 60 fps · 12 Mbps' },
+      small: { title: 'Small File', desc: '720×1280 · 30 fps · 4 Mbps' },
+    },
+    watermark: 'Add Watermark',
+    watermarkPos: 'Corner Position',
+    positions: {
+      topLeft: 'Top-Left',
+      topRight: 'Top-Right',
+      bottomLeft: 'Bottom-Left',
+      bottomRight: 'Bottom-Right',
+    },
+    startExport: 'Export Video MP4',
+    exporting: 'Rendering MP4...',
+    download: 'Download MP4',
+    share: 'Share Video',
+    cancel: 'Cancel',
+  },
   library: {
     title: 'Unified Asset Library',
     subtitle: 'Built-in and custom effects, transitions, fonts, and soundscapes.',
@@ -165,6 +251,43 @@ export const STRINGS = {
     duplicate: 'Duplicate',
     delete: 'Delete',
     open: 'Open Project',
+    backup: 'Backup',
+    restore: 'Restore .reelix file',
+    emptyTitle: 'No projects yet',
+    emptyDesc: 'Record your voice or upload clips in Create to build your first video.',
+  },
+  settings: {
+    title: 'Studio Settings',
+    subtitle: 'Brand, API credentials, local storage, and language.',
+    languageTitle: 'Language / ভাষা',
+    languageEn: 'English',
+    languageBn: 'বাংলা (Bengali)',
+    storageMeterTitle: 'Local Storage & OPFS Cache',
+    usedOf: 'used of',
+    projectsCount: 'Saved Projects',
+    clearCacheTitle: 'Clear Media Cache',
+    clearCacheDesc: 'Deletes unreferenced cached audio/video blobs from OPFS. Your saved projects remain untouched.',
+    clearCacheButton: 'Clear Cache',
+    cacheCleared: 'Unused media cache cleared successfully.',
+    showTourButton: 'Show App Tour',
+    keysTitle: 'API Credentials',
+    keysDesc: 'Saved locally in browser storage. Never sent to any third-party server.',
+    legalTitle: 'Privacy & Licenses',
+    privacyNote: '100% On-Device: Your media files, video renders, and API keys remain on your computer or phone. Gemini API is contacted strictly for analysis and script formatting.',
+    licensesNote: 'Credits: Pexels API (Stock video clips), Jamendo API (Royalty-free music), Freesound (CC0 sound effects), mp4-muxer & fflate.',
+    version: 'Version',
+    buildDate: 'Build Date',
+  },
+  shortcuts: {
+    title: 'Keyboard Shortcuts',
+    playPause: 'Play / Pause',
+    split: 'Split layer at playhead',
+    delete: 'Delete selected layer',
+    undo: 'Undo change',
+    redo: 'Redo change',
+    zoomIn: 'Zoom in timeline',
+    zoomOut: 'Zoom out timeline',
+    help: 'Show shortcuts dialog',
   },
   dialogs: {
     confirm: 'Confirm',
@@ -172,5 +295,322 @@ export const STRINGS = {
     close: 'Close',
     save: 'Save',
     tryAgain: 'Try Again',
+    copyDetails: 'Copy Details',
   },
-} as const;
+};
+
+export const STRINGS_BN = {
+  appName: BRAND.appName,
+  tagline: 'এআই ভার্টিক্যাল শর্টস স্টুডিও',
+  nav: {
+    home: 'হোম',
+    create: 'তৈরি করুন',
+    studio: 'স্টুডিও',
+    library: 'লাইব্রেরি',
+    projects: 'প্রজেক্টস',
+    settings: 'সেটিংস',
+    admin: 'অ্যাডমিন',
+  },
+  home: {
+    greeting: 'স্বাগতম',
+    headline: 'এক ক্লিকে তৈরি করুন ভাইরাল শর্টস',
+    subheadline: 'আপনার ভয়েস বা স্পিচ ভিডিও আপলোড করুন, এডিট বর্ণনা দিন, আর ডিরেক্টর এআই নিজে থেকেই কাট, বাংলা ক্যাপশন ও মিউজিক সাজিয়ে দেবে।',
+    createButton: 'নতুন শর্ট বানান',
+    resumeButton: 'স্টুডিওতে যান',
+    recentProjects: 'সাম্প্রতিক প্রজেক্ট',
+    noProjectsYet: 'এখনও কোনো প্রজেক্ট নেই। প্রথম ভয়েস ক্লিপ দিয়ে শুরু করুন!',
+    features: [
+      {
+        num: '০১',
+        title: 'ভয়েস-নির্ভর টাইমলাইন',
+        desc: 'শব্দে শব্দে মিলিয়ে ক্যাপশন এবং স্বয়ংক্রিয় সাইলেন্স রিমুভাল।',
+      },
+      {
+        num: '০২',
+        title: 'ডিরেক্টর এআই ও কপাইলট',
+        desc: 'সহজ বাংলায় নির্দেশ দিয়ে জুম পাঞ্চ, কাট ও ইফেক্ট পরিবর্তন।',
+      },
+      {
+        num: '০৩',
+        title: 'ওয়েবকোডেক্স এমপি৪ এক্সপোর্ট',
+        desc: 'ব্রাউজার বা ফোনেই সরাসরি হার্ডওয়্যার স্পিডে ১০৮০×১৯২০ এক্সপোর্ট।',
+      },
+    ],
+  },
+  onboarding: {
+    step1Title: `${BRAND.appName}-এ স্বাগতম`,
+    step1Subtitle: `ডিভাইস-লোকাল পেশাদার শর্ট ভিডিও মেকার। চোখের পলকে তৈরি করুন ১০৮০×১৯২০ শর্টস।`,
+    benefits: [
+      {
+        title: 'সম্পূর্ণ ভয়েসের তালে এডিটিং',
+        desc: 'আপনার কথা বলার গতির সাথে কাট, জুম ও হুক সিঙ্ক হয়।',
+      },
+      {
+        title: 'নীরবতা ও পজ রিমুভ',
+        desc: '২০ মিলিসেকেন্ডের অযথা নীরবতা কেটে গতিশীল রিদম তৈরি করে।',
+      },
+      {
+        title: 'বাংলা ও ইংরেজি ক্যাপশন',
+        desc: 'প্রতিটি শব্দের হাইলাইটসহ পরিষ্কার বাংলা ফন্টে ক্যাপশন।',
+      },
+    ],
+    step2Title: 'জেমিনি এপিআই সেটআপ',
+    step2Subtitle: 'কী সম্পূর্ণ আপনার ডিভাইসেই থাকে। কেবল অডিও বিশ্লেষণ ও ফ্রেম রিডিংয়ের জন্য এআই ব্যবহার হয়।',
+    geminiKeyLabel: 'গুগল এআই স্টুডিও এপিআই কী (ফ্রি টিয়ার সমর্থিত)',
+    geminiKeyPlaceholder: 'AIzaSy...',
+    testKeyButton: 'কী টেস্ট করুন',
+    testingKey: 'টেস্ট হচ্ছে...',
+    keyTestedSuccess: 'জেমিনি কী সক্রিয় এবং প্রস্তুত!',
+    keyTestedFail: 'সংযুক্ত হওয়া যায়নি। কী এবং ইন্টারনেট চেক করুন।',
+    getFreeKey: 'বিনামূল্যে জেমিনি কী নিন →',
+    addLaterTitle: 'ঐচ্ছিক কীসমূহ (সেটিংস থেকে পরে যোগ করা যাবে)',
+    optionalKeys: [
+      { name: 'Pexels API', unlocks: 'ভার্টিক্যাল স্টক বি-রোল ভিডিও ক্লিপের জন্য' },
+      { name: 'Jamendo API', unlocks: 'রয়্যালটি-ফ্রি ব্যাকগ্রাউন্ড মিউজিকের জন্য' },
+      { name: 'Freesound API', unlocks: 'হাজারো সাউন্ড ইফেক্টের জন্য' },
+    ],
+    step3Title: 'দ্রুত স্টুডিও পরিচিতি',
+    step3Subtitle: 'ভাইরাল শর্ট তৈরির ৩টি মূল টুল জেনে নিন:',
+    coachMarks: [
+      { title: '১. ক্রিয়েট উইজার্ড', desc: 'ভয়েস বা ক্লিপ দিন, প্রিসেট বেছে জেনারেট চাপুন।' },
+      { title: '২. মাল্টি-ট্র্যাক টাইমলাইন', desc: 'ফ্রেম বাই ফ্রেম স্ক্রাবিং, ট্রিম ও লাইভ প্রিভিউ।' },
+      { title: '৩. এডিট কপাইলট', desc: '"হলুদ ক্যাপশন দাও" বা "কাট দ্রুত করো" লিখে পরিবর্তন করুন।' },
+    ],
+    skip: 'স্কিপ করুন',
+    continue: 'পরবর্তী ধাপ',
+    startCreating: 'তৈরি শুরু করুন',
+  },
+  create: {
+    title: 'ভার্টিক্যাল শর্ট তৈরি করুন',
+    badge: '১০৮০×১৯২০ · ৯:১৬',
+    subtitle: 'ভয়েস বা ভিডিও দিন, এডিট বর্ণনা করুন এবং স্বয়ংক্রিয় শর্ট পান।',
+    apiKeyNotice: 'জেমিনি এপিআই কী সেট করা নেই। অফলাইন মোডে কাজ চলবে।',
+    configureKey: 'কী কনফিগার করুন',
+    steps: {
+      media: 'মিডিয়া',
+      describe: 'বর্ণনা',
+      studio: 'স্টুডিও',
+    },
+    presetsRowTitle: 'এডিট স্টাইল প্রিসেট',
+    presets: [
+      { id: 'viral-hype', label: 'ভাইরাল হাইপ', desc: 'দ্রুত জুম, পাঞ্চ-ইন ও হাইপ মিউজিক' },
+      { id: 'calm-cinematic', label: 'শান্ত সিনেমাটিক', desc: 'ধীরগতির প্যান, গ্লো ও অ্যাম্বিয়েন্ট মিউজিক' },
+      { id: 'clean-explainer', label: 'সহজ এক্সপ্লেইনার', desc: 'পরিষ্কার কাট, বক্স ক্যাপশন ও লো-ফাই' },
+      { id: 'news-flash', label: 'নিউজ ফ্ল্যাশ', desc: 'জরুরি হুক ও নাটকীয় মিউজিক' },
+    ],
+    voiceCard: {
+      title: 'আপনার ভয়েস',
+      requiredBadge: 'আবশ্যক',
+      helper: 'অ্যাপে রেকর্ড করুন বা অডিও ফাইল (.mp3, .wav, .m4a) আপলোড দিন',
+      recordButton: 'অ্যাপে ভয়েস রেকর্ড করুন',
+      stopRecording: 'রেকর্ডিং বন্ধ করুন',
+      orUpload: '— অথবা অডিও ফাইল আপলোড করুন —',
+      uploadPlaceholder: 'ভয়েস আপলোড (.mp3, .wav, .m4a, .webm)',
+      tipText: 'ভয়েস ফাইল নেই? কথার ভিডিও আপলোড দিলে তার অডিও স্বয়ংক্রিয়ভাবে ব্যবহৃত হবে।',
+    },
+    videoCard: {
+      title: 'ভিডিও ক্লিপস',
+      optionalBadge: 'ঐচ্ছিক',
+      helper: 'বি-রোল বা ব্যাকগ্রাউন্ড ফুটেজ (.mp4, .mov)',
+      uploadButton: 'ক্লিপ আপলোড দিন',
+      attached: 'টি ক্লিপ সংযুক্ত',
+    },
+    imagesCard: {
+      title: 'ছবি ও গ্রাফিক্স',
+      optionalBadge: 'ঐচ্ছিক',
+      uploadButton: 'ছবি আপলোড দিন',
+      attached: 'টি ছবি সংযুক্ত',
+    },
+    musicCard: {
+      title: 'ব্যাকগ্রাউন্ড মিউজিক',
+      optionalBadge: 'ঐচ্ছিক',
+      uploadButton: 'মিউজিক আপলোড (.mp3, .wav)',
+      attached: 'মিউজিক ট্র্যাক যুক্ত',
+    },
+    describeCard: {
+      title: 'এডিটের বিবরণ দিন',
+      subtitle: 'ডিরেক্টর এআই কীভাবে কাটবে, গতি কেমন হবে তা জানিয়ে দিন।',
+      placeholder: 'ক্লিপগুলো ভয়েসের সাথে মিলিয়ে কাটো, সাইলেন্স রিমুভ করো, হলুদ ক্যাপশন দাও\n(যেমন: দ্রুত কাট, বাংলা ক্যাপশন, গুরুত্বপূর্ণ শব্দে জুম পাঞ্চ)',
+      chips: [
+        'ভয়েসের সাথে ক্লিপ মিলাও',
+        'সাইলেন্স রিমুভ করো',
+        'জুম পাঞ্চ যোগ করো',
+        'ডার্ক সিনেমাটিক',
+        'বাংলা ক্যাপশন দাও',
+        'দ্রুত কাট দাও',
+        'সাউন্ড ইফেক্ট দাও',
+        'ব্যাকগ্রাউন্ড মিউজিক দাও',
+      ],
+      removeSilenceTitle: 'স্বয়ংক্রিয় নীরবতা ও পজ রিমুভাল',
+      removeSilenceSubtitle: '২০ মিলিসেকেন্ডের ডেড এয়ার কেটে কথা মসৃণ করে',
+    },
+    styleRow: {
+      niche: 'বিষয় / নিশ',
+      pacing: 'গতি / পেসিং',
+      language: 'ভাষা',
+      captionStyle: 'ক্যাপশন স্টাইল',
+    },
+    scriptRow: {
+      toggleLabel: 'স্ক্রিপ্ট পেস্ট করুন (ক্যাপশন বানান নিখুঁত করতে)',
+      placeholder: 'ক্যাপশনের নির্ভুল বানানের জন্য আপনার পুরো স্ক্রিপ্টটি এখানে পেস্ট করতে পারেন...',
+    },
+    generateButton: 'শর্ট তৈরি করুন',
+    disabledNotice: 'শুরু করতে দয়া করে একটি ভয়েস ফাইল দিন অথবা কথার ভিডিও ক্লিপ দিন।',
+  },
+  studio: {
+    backToCreate: 'তৈরি পেজে ফিরে যান',
+    exportButton: '১০৮০পি এক্সপোর্ট',
+    undo: 'পূর্বাবস্থায় ফেরান',
+    redo: 'পুনরায় করুন',
+    saved: 'সংরক্ষিত',
+    saving: 'সংরক্ষণ হচ্ছে...',
+    defaultProjectTitle: 'শিরোনামহীন শর্ট',
+    previewBadge: '১০৮০পি',
+    hookBadge: 'হুক',
+    mute: 'সাউন্ড অফ',
+    unmute: 'সাউন্ড অন',
+    loop: 'লুপ প্লেব্যাকিং',
+    backupProject: 'প্রজেক্ট ব্যাকআপ (.reelix)',
+    restoreProject: 'প্রজেক্ট রিস্টোর',
+    timeline: {
+      lanes: {
+        video: 'ভিডিও',
+        voice: 'ভয়েস',
+        captions: 'ক্যাপশন',
+        text: 'টেক্সট',
+        music: 'মিউজিক',
+        sfx: 'এসএফএক্স',
+        images: 'ওভারলে',
+      },
+      zoomIn: 'টাইমলাইন বড় করুন',
+      zoomOut: 'টাইমলাইন ছোট করুন',
+    },
+    toolbar: {
+      edit: 'এডিট',
+      audio: 'অডিও',
+      text: 'টেক্সট',
+      effects: 'ইফেক্টস',
+      overlay: 'ওভারলে',
+      captions: 'ক্যাপশন',
+    },
+  },
+  copilot: {
+    collapsedPlaceholder: 'কী পরিবর্তন করতে চান বলুন…',
+    editing: 'টাইমলাইন পরিবর্তন হচ্ছে…',
+    chips: [
+      'ক্যাপশন বড় করো',
+      'হুকে গ্লিচ দাও',
+      'কাট দ্রুত করো',
+      'ভয়েস লাউড করো',
+      'শেষ জুম মুছে ফেলো',
+    ],
+    undoAction: 'পরিবর্তন বাতিল',
+    retryAction: 'আবার চেষ্টা করুন',
+    recentChanges: 'সাম্প্রতিক পরিবর্তন',
+  },
+  export: {
+    title: 'ভার্টিক্যাল ভিডিও এক্সপোর্ট',
+    subtitle: 'ওয়েবকোডেক্স হার্ডওয়্যার অ্যাক্সিলারেশনের মাধ্যমে ব্রাউজারে দ্রুত এমপি৪ রেন্ডার।',
+    presetsTitle: 'এক্সপোর্ট প্রিসেট',
+    presets: {
+      standard: { title: 'শর্টস / রিলস / টিকটক', desc: '১০৮০×১৯২০ · ৩০ এফপিএস · ৮ এমবিপিএস' },
+      hq: { title: 'উচ্চ মান (HQ)', desc: '১০৮০×১৯২০ · ৬০ এফপিএস · ১২ এমবিপিএস' },
+      small: { title: 'ছোট ফাইল সাইজ', desc: '৭২০×১২৮০ · ৩০ এফপিএস · ৪ এমবিপিএস' },
+    },
+    watermark: 'ওয়াটারমার্ক যোগ করুন',
+    watermarkPos: 'ওয়াটারমার্ক অবস্থান',
+    positions: {
+      topLeft: 'উপর-বাম',
+      topRight: 'উপর-ডান',
+      bottomLeft: 'নিচ-বাম',
+      bottomRight: 'নিচ-ডান',
+    },
+    startExport: 'ভিডিও এমপি৪ এক্সপোর্ট করুন',
+    exporting: 'এমপি৪ রেন্ডার হচ্ছে...',
+    download: 'এমপি৪ ডাউনলোড',
+    share: 'শেয়ার করুন',
+    cancel: 'বাতিল',
+  },
+  library: {
+    title: 'অ্যাসেট লাইব্রেরি',
+    subtitle: 'ইফেক্ট, ট্রানজিশন, ফন্ট এবং সাউন্ড কালেকশন।',
+    searchPlaceholder: 'লাইব্রেরি খুঁজুন...',
+  },
+  projects: {
+    title: 'সংরক্ষিত প্রজেক্ট',
+    subtitle: 'আপনার ডিভাইসের IndexedDB-তে সুরক্ষিত প্রজেক্টসমূহ।',
+    confirmDelete: 'আপনি কি নিশ্চিতভাবে এই প্রজেক্টটি মুছে ফেলতে চান?',
+    rename: 'নাম পরিবর্তন',
+    duplicate: 'কপি করুন',
+    delete: 'মুছুন',
+    open: 'প্রজেক্ট খুলুন',
+    backup: 'ব্যাকআপ',
+    restore: '.reelix ফাইল রিস্টোর',
+    emptyTitle: 'এখনও কোনো প্রজেক্ট নেই',
+    emptyDesc: 'আপনার ভয়েস বা ক্লিপ দিয়ে প্রথম ভিডিও তৈরি করুন।',
+  },
+  settings: {
+    title: 'স্টুডিও সেটিংস',
+    subtitle: 'ব্র্যান্ডিং, এপিআই ক্রেডেনশিয়াল, স্টোরেজ ও ভাষা।',
+    languageTitle: 'Language / ভাষা',
+    languageEn: 'English',
+    languageBn: 'বাংলা (Bengali)',
+    storageMeterTitle: 'ডিভাইস স্টোরেজ ও ওপিএফএস ক্যাশ',
+    usedOf: 'ব্যবহৃত হয়েছে (মোট',
+    projectsCount: 'টি সংরক্ষিত প্রজেক্ট',
+    clearCacheTitle: 'মিডিয়া ক্যাশ খালি করুন',
+    clearCacheDesc: 'ব্যবহৃত না হওয়া সব ক্যাশ ফাইল মুছে ফেলুন। আপনার সেভ করা প্রজেক্ট অক্ষত থাকবে।',
+    clearCacheButton: 'ক্যাশ খালি করুন',
+    cacheCleared: 'অব্যবহৃত মিডিয়া ক্যাশ সফলভাবে মুছে ফেলা হয়েছে।',
+    showTourButton: 'অ্যাপ ট্যুর দেখুন',
+    keysTitle: 'এপিআই ক্রেডেনশিয়ালস',
+    keysDesc: 'শুধুমাত্র আপনার ব্রাউজারে সুরক্ষিত থাকে। কোনো থার্ড-পার্টি সার্ভারে পাঠানো হয় না।',
+    legalTitle: 'গোপনীয়তা ও লাইসেন্স',
+    privacyNote: '১০০% অন-ডিভাইস: আপনার অডিও, ফুটেজ এবং কি আপনার ডিভাইসেই সুরক্ষিত থাকে। কেবল নির্দেশ অনুযায়ী বিশ্লেষণ করতে জেমিনি এপিআই কল করা হয়।',
+    licensesNote: 'কৃতজ্ঞতা: Pexels API, Jamendo API, Freesound, mp4-muxer ও fflate।',
+    version: 'ভার্সন',
+    buildDate: 'বিল্ড ডেট',
+  },
+  shortcuts: {
+    title: 'কীবোর্ড শর্টকাট',
+    playPause: 'প্লে / পজ',
+    split: 'প্লেহেডে লেয়ার স্প্লিট',
+    delete: 'নির্বাচিত লেয়ার ডিলিট',
+    undo: 'আগের অবস্থায় নিন',
+    redo: 'পুনরায় করুন',
+    zoomIn: 'টাইমলাইন জুম ইন',
+    zoomOut: 'টাইমলাইন জুম আউট',
+    help: 'শর্টকাট তালিকা',
+  },
+  dialogs: {
+    confirm: 'নিশ্চিত করুন',
+    cancel: 'বাতিল',
+    close: 'বন্ধ করুন',
+    save: 'সংরক্ষণ',
+    tryAgain: 'আবার চেষ্টা করুন',
+    copyDetails: 'বিস্তারিত কপি করুন',
+  },
+};
+
+export const useLanguageStore = create<{
+  lang: Language;
+  setLang: (l: Language) => void;
+}>((set) => ({
+  lang: typeof window !== 'undefined' ? (localStorage.getItem('reelix_language') as Language) || 'en' : 'en',
+  setLang: (lang) => {
+    if (typeof window !== 'undefined') localStorage.setItem('reelix_language', lang);
+    set({ lang });
+  },
+}));
+
+export function getStrings(lang: Language = 'en') {
+  return lang === 'bn' ? STRINGS_BN : STRINGS_EN;
+}
+
+export function useStrings() {
+  const lang = useLanguageStore((s) => s.lang);
+  return getStrings(lang);
+}
+
+// Backwards-compatible export
+export const STRINGS = STRINGS_EN;

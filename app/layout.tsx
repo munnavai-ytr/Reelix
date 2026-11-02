@@ -31,6 +31,11 @@ const fontBengali = Hind_Siliguri({
 export const metadata: Metadata = {
   title: `${BRAND.appName} — ${BRAND.tagline}`,
   description: 'AI-powered one-click vertical Shorts (1080x1920) video creator and editor with real-time canvas preview, Whisper transcription, Gemini Director engine, and WebCodecs MP4 export.',
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: '/pwa-192x192.png',
+    apple: '/apple-touch-icon.png',
+  },
   openGraph: {
     title: `${BRAND.appName} — ${BRAND.tagline}`,
     description: 'AI-powered one-click vertical Shorts (1080x1920) video creator and editor with real-time canvas preview, Whisper transcription, Gemini Director engine, and WebCodecs MP4 export.',
@@ -64,6 +69,17 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js').catch(function(){});
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

@@ -24,6 +24,8 @@ export interface StudioState {
   exportedBlob: Blob | null;
   showSplash: boolean;
   showOnboarding: boolean;
+  saveStatus: 'saved' | 'saving' | 'idle';
+  lastSavedTime: number | null;
 
   // Actions
   setPlan: (plan: EditPlan) => void;
@@ -51,6 +53,30 @@ export interface StudioState {
   redo: () => void;
 }
 
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedSave(plan: EditPlan, set: (partial: Partial<StudioState>) => void) {
+  set({ saveStatus: 'saving' });
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    ProjectDb.saveProject({
+      id: plan.id,
+      title: plan.title,
+      duration: plan.duration,
+      updatedAt: Date.now(),
+      createdAt: plan.metadata?.createdAt || Date.now(),
+      editPlan: plan,
+    })
+      .then(() => {
+        set({ saveStatus: 'saved', lastSavedTime: Date.now() });
+      })
+      .catch((err) => {
+        console.warn('[AutoSave] Error saving project:', err);
+        set({ saveStatus: 'idle' });
+      });
+  }, 800);
+}
+
 export const useStudioStore = create<StudioState>((set, get) => ({
   currentPlan: null,
   currentTime: 0,
@@ -70,6 +96,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   exportedBlob: null,
   showSplash: true,
   showOnboarding: false,
+  saveStatus: 'idle',
+  lastSavedTime: null,
 
   setPlan: (plan) => {
     releaseAllBlobUrls();
@@ -80,6 +108,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       history: [],
       future: [],
       selectedLayerId: plan.layers[0]?.id || null,
+      saveStatus: 'saved',
+      lastSavedTime: Date.now(),
     });
 
     ensureWindow(plan, get().assets, 0)
@@ -173,14 +203,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    ProjectDb.saveProject({
-      id: updatedPlan.id,
-      title: updatedPlan.title,
-      duration: updatedPlan.duration,
-      updatedAt: Date.now(),
-      createdAt: updatedPlan.metadata.createdAt,
-      editPlan: updatedPlan,
-    }).catch(() => {});
+    debouncedSave(updatedPlan, set);
   },
 
   deleteLayer: (layerId) => {
@@ -204,14 +227,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    ProjectDb.saveProject({
-      id: updatedPlan.id,
-      title: updatedPlan.title,
-      duration: updatedPlan.duration,
-      updatedAt: Date.now(),
-      createdAt: updatedPlan.metadata.createdAt,
-      editPlan: updatedPlan,
-    }).catch(() => {});
+    debouncedSave(updatedPlan, set);
   },
 
   duplicateLayer: (layerId) => {
@@ -243,14 +259,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    ProjectDb.saveProject({
-      id: updatedPlan.id,
-      title: updatedPlan.title,
-      duration: updatedPlan.duration,
-      updatedAt: Date.now(),
-      createdAt: updatedPlan.metadata.createdAt,
-      editPlan: updatedPlan,
-    }).catch(() => {});
+    debouncedSave(updatedPlan, set);
   },
 
   addLayer: (layer) => {
@@ -272,14 +281,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    ProjectDb.saveProject({
-      id: updatedPlan.id,
-      title: updatedPlan.title,
-      duration: updatedPlan.duration,
-      updatedAt: Date.now(),
-      createdAt: updatedPlan.metadata.createdAt,
-      editPlan: updatedPlan,
-    }).catch(() => {});
+    debouncedSave(updatedPlan, set);
   },
 
   splitLayerAtPlayhead: (layerId) => {
@@ -330,14 +332,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [],
     });
 
-    ProjectDb.saveProject({
-      id: updatedPlan.id,
-      title: updatedPlan.title,
-      duration: updatedPlan.duration,
-      updatedAt: Date.now(),
-      createdAt: updatedPlan.metadata.createdAt,
-      editPlan: updatedPlan,
-    }).catch(() => {});
+    debouncedSave(updatedPlan, set);
   },
 
   reorderLayers: (startIndex, endIndex) => {
@@ -362,6 +357,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       history: nextHistory,
       future: [],
     });
+
+    debouncedSave(updatedPlan, set);
   },
 
   undo: () => {
@@ -378,6 +375,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: [currentPlan, ...future],
       selectedLayerId: previous.layers[0]?.id || null,
     });
+
+    debouncedSave(previous, set);
   },
 
   redo: () => {
@@ -394,5 +393,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       future: newFuture,
       selectedLayerId: next.layers[0]?.id || null,
     });
+
+    debouncedSave(next, set);
   },
 }));

@@ -19,17 +19,22 @@ import {
   Plus,
   X,
   Volume2,
+  AlertTriangle,
 } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import confetti from 'canvas-confetti';
 import { GamificationService } from '@/storage/gamification';
 import { MediaCacheDb } from '@/storage/db';
 import { toast } from './Toast';
-import { STRINGS } from '@/ui/strings';
+import { STRINGS, useStrings, useLanguageStore } from '@/ui/strings';
 import { BRAND } from '@/ui/brand';
+import { EDIT_STYLE_PRESETS, EditStylePreset } from '@/ui/presets';
+import { ApiKeysService } from '@/storage/keys';
 
 export function CreateWizard() {
-  const { setPipelineProgress, setPlan, setAssets, setActiveTab } = useStudioStore();
+  const strings = useStrings();
+  const lang = useLanguageStore((s) => s.lang);
+  const { setPipelineProgress, setPlan, setAssets, setActiveTab, setShowOnboarding } = useStudioStore();
 
   // Primary Voice & Media Inputs
   const [audioFile, setAudioFile] = useState<File | Blob | null>(null);
@@ -57,6 +62,20 @@ export function CreateWizard() {
   const [captionStyle, setCaptionStyle] = useState('karaoke-word-highlight');
   const [language, setLanguage] = useState('auto');
   const [showScriptRow, setShowScriptRow] = useState(false);
+  const [hasApiKey] = useState(() => ApiKeysService.hasGeminiKey());
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('viral-hype');
+
+  const applyPreset = (preset: EditStylePreset) => {
+    triggerHaptic('light');
+    setSelectedPresetId(preset.id);
+    setCaptionStyle(preset.captionStyle);
+    setStyle(preset.pacing);
+    setNiche(preset.niche);
+    // User's own description always has priority: if userPrompt is empty, populate suggested prompt
+    if (!userPrompt.trim()) {
+      setUserPrompt(preset.suggestedPrompt);
+    }
+  };
 
   // Canvas Waveform & Recorder refs
   const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -462,6 +481,71 @@ export function CreateWizard() {
           <span className="px-2.5 py-1 text-[#8D8DA8] font-medium text-[11px]">
             3 Studio
           </span>
+        </div>
+      </div>
+
+      {/* Non-blocking API Key Missing Banner */}
+      {!hasApiKey && (
+        <div className="p-3 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-amber-300">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+            <span className="leading-snug">{strings.create.apiKeyNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light');
+              setShowOnboarding(true);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold shrink-0 transition-colors"
+          >
+            {strings.create.configureKey}
+          </button>
+        </div>
+      )}
+
+      {/* Edit Style Presets Row */}
+      <div className="p-4 rounded-2xl bg-[#12121C] border border-[#26263A] space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider">
+              {strings.create.presetsRowTitle}
+            </span>
+          </div>
+          <span className="text-[11px] text-[#8D8DA8] hidden sm:inline">
+            Configures pacing, captions & soundtrack
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {EDIT_STYLE_PRESETS.map((preset) => {
+            const isActive = selectedPresetId === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden group ${
+                  isActive
+                    ? 'bg-violet-600/20 border-violet-500 shadow-md shadow-violet-500/10 text-white'
+                    : 'bg-[#191927] border-[#26263A] text-slate-300 hover:border-white/20'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold">
+                    {lang === 'bn' ? preset.nameBn : preset.name}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-cyan-300 font-mono">
+                    {preset.musicMood}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#8D8DA8] line-clamp-2 leading-tight">
+                  {lang === 'bn' ? preset.descriptionBn : preset.description}
+                </p>
+              </button>
+            );
+          })}
         </div>
       </div>
 
