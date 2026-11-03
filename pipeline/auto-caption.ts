@@ -868,10 +868,14 @@ Allowed fontFamily: ${allowedFonts.slice(0, 10).join(', ')}.`;
       positionY: captionSpec.positionY,
     });
 
+    const mediaFileName = (mediaFile as File).name || (isVideo ? 'Video' : 'Audio');
+    const cleanFileName = mediaFileName.replace(/\.[^/.]+$/, '');
+    const planTitle = `Auto Caption – ${cleanFileName}`;
+
     const planId = `autocaption_${Date.now()}`;
     plan = {
       id: planId,
-      title: isVideo ? 'Captioned Video' : 'Captioned Audio',
+      title: planTitle,
       duration: totalDuration,
       fps: 30,
       canvas: {

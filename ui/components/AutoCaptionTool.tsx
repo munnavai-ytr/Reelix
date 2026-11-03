@@ -33,6 +33,7 @@ import {
   Video,
   X,
   Plus,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface EditableLine {
@@ -41,6 +42,11 @@ interface EditableLine {
   start: number;
   end: number;
   words: TimedWord[];
+}
+
+export interface AutoCaptionToolProps {
+  initialDescription?: string;
+  onBack?: () => void;
 }
 
 const STYLE_PROMPT_CHIPS = [
@@ -57,7 +63,7 @@ const STYLE_PROMPT_CHIPS = [
   'Typewriter terminal',
 ];
 
-export function AutoCaptionTool() {
+export function AutoCaptionTool({ initialDescription, onBack }: AutoCaptionToolProps = {}) {
   const { setPlan, setActiveTab } = useStudioStore();
 
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -66,8 +72,16 @@ export function AutoCaptionTool() {
   const [isVideo, setIsVideo] = useState(false);
 
   const [description, setDescription] = useState(
-    'Karaoke word glow in vibrant yellow, bold font in the bottom third'
+    initialDescription || 'Karaoke word glow in vibrant yellow, bold font in the bottom third'
   );
+  const [prevInitialDesc, setPrevInitialDesc] = useState(initialDescription);
+
+  if (initialDescription !== prevInitialDesc) {
+    setPrevInitialDesc(initialDescription);
+    if (initialDescription) {
+      setDescription(initialDescription);
+    }
+  }
   const [language, setLanguage] = useState('auto');
   const [maxWordsPerLine, setMaxWordsPerLine] = useState(3);
   const [scriptText, setScriptText] = useState('');
@@ -396,15 +410,28 @@ export function AutoCaptionTool() {
           </p>
         </div>
 
-        {/* Studio quick jump button if there's a plan */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('editor')}
-          className="self-start sm:self-auto text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#8D8DA8] hover:text-white border border-white/5 flex items-center gap-1.5 transition-colors"
-        >
-          <span>Open Studio</span>
-          <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
-        </button>
+        {/* Back button or Studio quick jump */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 flex items-center gap-1.5 text-xs font-semibold transition-colors min-h-[44px] touch-target focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
+            >
+              <ArrowLeft className="w-4 h-4 text-cyan-400" />
+              <span>Back to All Tools</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('editor')}
+            className="text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#8D8DA8] hover:text-white border border-white/5 flex items-center gap-1.5 transition-colors min-h-[44px] touch-target focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
+          >
+            <span>Open Studio</span>
+            <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
+          </button>
+        </div>
       </div>
 
       {/* ERROR CARD WITH RETRY */}

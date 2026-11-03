@@ -12,6 +12,7 @@ import {
   Database,
   Wand2,
   Subtitles,
+  LayoutGrid,
 } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import { BRAND } from '@/ui/brand';
@@ -21,14 +22,15 @@ export function Navigation() {
   const { activeTab, setActiveTab } = useStudioStore();
 
   const desktopNavItems: Array<{
-    id: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'autocaption';
+    id: 'home' | 'create' | 'tools' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'autocaption';
     label: string;
     icon: typeof Home;
     badge?: string;
   }> = [
     { id: 'home', label: STRINGS.nav.home, icon: Home },
     { id: 'create', label: STRINGS.nav.create, icon: Sparkles, badge: 'AI' },
-    { id: 'autocaption', label: 'Auto Caption', icon: Subtitles, badge: 'NEW' },
+    { id: 'tools', label: STRINGS.nav.tools || 'All Tools', icon: LayoutGrid, badge: 'NEW' },
+    { id: 'autocaption', label: 'Auto Caption', icon: Subtitles },
     { id: 'editor', label: STRINGS.nav.studio, icon: Film },
     { id: 'library', label: STRINGS.nav.library, icon: Database },
     { id: 'creator', label: 'AI Studio', icon: Wand2 },

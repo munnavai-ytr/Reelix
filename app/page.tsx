@@ -20,12 +20,14 @@ import { LibraryTab } from '@/ui/components/LibraryTab';
 import { AiCreatorStudio } from '@/ui/components/AiCreatorStudio';
 import { EditCopilot } from '@/ui/components/EditCopilot';
 import { AutoCaptionTool } from '@/ui/components/AutoCaptionTool';
+import { ToolsHub } from '@/ui/components/ToolsHub';
 import { ToastProvider } from '@/ui/components/Toast';
 import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
 import {
   Sparkles,
   Film,
   Subtitles,
+  LayoutGrid,
   ArrowRight,
   Shield,
   Video,
@@ -237,11 +239,23 @@ export default function StudioPage() {
                           type="button"
                           onClick={() => {
                             triggerHaptic('medium');
+                            setActiveTab('tools');
+                          }}
+                          className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-cyan-500/30 hover:border-cyan-400 transition-colors touch-target min-h-[44px]"
+                        >
+                          <LayoutGrid className="w-4 h-4 text-cyan-400" />
+                          <span>{STRINGS.toolsHub?.title || 'All Tools'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('medium');
                             setActiveTab('autocaption');
                           }}
-                          className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-cyan-500/30 hover:border-cyan-400 transition-colors touch-target"
+                          className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-white/10 hover:border-white/20 transition-colors touch-target min-h-[44px]"
                         >
-                          <Subtitles className="w-4 h-4 text-cyan-400" />
+                          <Subtitles className="w-4 h-4 text-slate-300" />
                           <span>Auto Caption</span>
                         </button>
 
@@ -252,7 +266,7 @@ export default function StudioPage() {
                               triggerHaptic('light');
                               setActiveTab('editor');
                             }}
-                            className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-[#26263A] transition-colors touch-target"
+                            className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-[#26263A] transition-colors touch-target min-h-[44px]"
                           >
                             <Film className="w-4 h-4 text-violet-400" />
                             <span>{STRINGS.home.resumeButton}</span>
@@ -288,6 +302,13 @@ export default function StudioPage() {
             {activeTab === 'create' && (
               <ErrorBoundary tabName="Create Wizard">
                 <CreateWizard />
+              </ErrorBoundary>
+            )}
+
+            {/* TAB: TOOLS HUB */}
+            {activeTab === 'tools' && (
+              <ErrorBoundary tabName="All Tools Hub">
+                <ToolsHub />
               </ErrorBoundary>
             )}
 
