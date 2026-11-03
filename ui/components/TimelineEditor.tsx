@@ -63,16 +63,17 @@ export function TimelineEditor() {
     handleTimelineScrub(e.clientX);
   };
 
-  const handleTrimStart = (e: React.MouseEvent, layerId: string, edge: 'start' | 'end') => {
+  const handleTrimStart = (e: React.MouseEvent | React.TouchEvent, layerId: string, edge: 'start' | 'end') => {
     e.stopPropagation();
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     if (!currentPlan) return;
     const layer = currentPlan.layers.find((l) => l.id === layerId);
     if (!layer) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     setTrimmingState({
       layerId,
       edge,
-      startX: e.clientX,
+      startX: clientX,
       initialStart: layer.startTime,
       initialDuration: layer.duration,
     });
@@ -393,8 +394,9 @@ export function TimelineEditor() {
                               {/* Left trim handle */}
                               <div
                                 onMouseDown={(e) => handleTrimStart(e, layer.id, 'start')}
-                                dangerouslySetInnerHTML={{ __html: '' }}
-                                className="absolute left-0 top-0 bottom-0 w-4 min-w-[24px] bg-white/80 hover:bg-white cursor-ew-resize flex items-center justify-center rounded-l-md z-20 group"
+                                onTouchStart={(e) => handleTrimStart(e, layer.id, 'start')}
+                                style={{ touchAction: 'none' }}
+                                className="absolute left-0 top-0 bottom-0 w-4 min-w-[24px] min-h-[44px] before:absolute before:-inset-y-3 before:-inset-x-2 before:content-[''] bg-white/80 hover:bg-white cursor-ew-resize flex items-center justify-center rounded-l-md z-20 group"
                               >
                                 <div className="w-1 h-3 bg-black/60 rounded-full" />
                               </div>
@@ -402,8 +404,9 @@ export function TimelineEditor() {
                               {/* Right trim handle */}
                               <div
                                 onMouseDown={(e) => handleTrimStart(e, layer.id, 'end')}
-                                dangerouslySetInnerHTML={{ __html: '' }}
-                                className="absolute right-0 top-0 bottom-0 w-4 min-w-[24px] bg-white/80 hover:bg-white cursor-ew-resize flex items-center justify-center rounded-r-md z-20 group"
+                                onTouchStart={(e) => handleTrimStart(e, layer.id, 'end')}
+                                style={{ touchAction: 'none' }}
+                                className="absolute right-0 top-0 bottom-0 w-4 min-w-[24px] min-h-[44px] before:absolute before:-inset-y-3 before:-inset-x-2 before:content-[''] bg-white/80 hover:bg-white cursor-ew-resize flex items-center justify-center rounded-r-md z-20 group"
                               >
                                 <div className="w-1 h-3 bg-black/60 rounded-full" />
                               </div>

@@ -157,6 +157,7 @@ export interface AudioLayer extends BaseLayer {
   fadeIn?: number;
   fadeOut?: number;
   ducking?: AudioDuckingConfig;
+  sfxType?: 'whoosh' | 'pop' | 'hit' | 'ding';
 }
 
 export type Layer =

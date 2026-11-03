@@ -440,7 +440,6 @@ export function CreateWizard() {
       setTimeout(() => {
         setPipelineProgress(null);
         setPlan(res.plan);
-        setAssets(res.assets);
         setActiveTab('editor');
       }, 500);
     } catch (err: unknown) {

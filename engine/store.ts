@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { EditPlan, Layer, VideoLayer } from './types';
 import { AssetCache } from './renderer';
-import { ensureAssets, ensureWindow, releaseAllBlobUrls } from './media';
+import { ensureWindow, releaseAssetCache } from './media';
 import { PipelineProgressEvent } from '../pipeline/types';
 import { ExportProgress } from '../pipeline/exporter';
 import { ProjectDb } from '../storage/db';
@@ -100,9 +100,17 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   lastSavedTime: null,
 
   setPlan: (plan) => {
-    releaseAllBlobUrls();
+    const prevPlan = get().currentPlan;
+    if (prevPlan && prevPlan.id !== plan.id) {
+      releaseAssetCache(get().assets);
+    }
+    const freshCache: AssetCache = {
+      videos: new Map(),
+      images: new Map(),
+    };
     set({
       currentPlan: plan,
+      assets: freshCache,
       currentTime: 0,
       isPlaying: false,
       history: [],
@@ -112,17 +120,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       lastSavedTime: Date.now(),
     });
 
-    ensureWindow(plan, get().assets, 0)
+    ensureWindow(plan, freshCache, 0)
       .then(() => {
-        set({ assetVersion: get().assetVersion + 1 });
+        set({ assets: freshCache, assetVersion: get().assetVersion + 1 });
       })
       .catch(() => {});
-
-    ensureAssets(plan, get().assets, () => {
-      set({ assetVersion: get().assetVersion + 1 });
-    }).then((updated) => {
-      set({ assets: updated, assetVersion: get().assetVersion + 1 });
-    });
   },
 
   applyPlan: (plan) => {
@@ -138,11 +140,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       selectedLayerId: plan.layers[0]?.id || null,
     });
 
-    ensureAssets(plan, get().assets, () => {
-      set({ assetVersion: get().assetVersion + 1 });
-    }).then((updated) => {
-      set({ assets: updated, assetVersion: get().assetVersion + 1 });
-    });
+    ensureWindow(plan, get().assets, clampedTime)
+      .then(() => {
+        set({ assetVersion: get().assetVersion + 1 });
+      })
+      .catch(() => {});
   },
 
   setAssets: (assets) => set({ assets, assetVersion: get().assetVersion + 1 }),

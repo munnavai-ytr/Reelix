@@ -8,6 +8,8 @@ import { Layer, AudioLayer, VideoLayer, CaptionChunk } from '../engine/types';
 import { repairDirectorScenes, assembleFullEditPlan, RawAiScene } from '../ai/director';
 import { DirectorRequest } from '../ai/types';
 import { Registry } from '../registry';
+import { sanitizeSvg } from '../lib/sanitize-svg';
+import { resolveSfx } from '../pipeline/assets';
 
 test('detectSilences identifies speech vs silence windows correctly', () => {
   const sampleRate = 16000;
@@ -334,3 +336,87 @@ test('assembleFullEditPlan with OPFS URIs produces a plan containing zero blob U
   assert.ok(musicLayer, 'Must have music layer');
   assert.equal(musicLayer.src, 'opfs://soundtrack.mp3');
 });
+
+test('given layers with sfxType, every sfx layer ends up with a non-empty src', async () => {
+  const sfxLayers: AudioLayer[] = [
+    {
+      id: 'sfx_0',
+      name: 'SFX whoosh',
+      type: 'audio',
+      audioType: 'sfx',
+      trackIndex: 6,
+      startTime: 0,
+      duration: 0.8,
+      volume: 0.5,
+      src: '',
+      sfxType: 'whoosh',
+    },
+    {
+      id: 'sfx_1',
+      name: 'SFX pop',
+      type: 'audio',
+      audioType: 'sfx',
+      trackIndex: 6,
+      startTime: 1.5,
+      duration: 0.8,
+      volume: 0.5,
+      src: '',
+      sfxType: 'pop',
+    },
+    {
+      id: 'sfx_2',
+      name: 'SFX hit',
+      type: 'audio',
+      audioType: 'sfx',
+      trackIndex: 6,
+      startTime: 3.0,
+      duration: 0.8,
+      volume: 0.5,
+      src: '',
+      sfxType: 'hit',
+    },
+    {
+      id: 'sfx_3',
+      name: 'SFX ding',
+      type: 'audio',
+      audioType: 'sfx',
+      trackIndex: 6,
+      startTime: 4.5,
+      duration: 0.8,
+      volume: 0.5,
+      src: '',
+      sfxType: 'ding',
+    },
+  ];
+
+  const typesToResolve = sfxLayers.map((l) => l.sfxType || 'whoosh');
+  const resolvedMap = await resolveSfx(typesToResolve);
+
+  for (const l of sfxLayers) {
+    const sfxType = l.sfxType || 'whoosh';
+    l.src = resolvedMap[sfxType] || resolvedMap['whoosh'] || '';
+    assert.ok(l.src.length > 0, `Layer ${l.id} (${sfxType}) must have a non-empty src`);
+    assert.ok(!l.src.startsWith('http'), `Layer ${l.id} src must never be a remote http(s) URL`);
+  }
+});
+
+test('sanitizeSvg removes unsafe tags, event handlers, javascript urls and allows safe svg', () => {
+  const maliciousSvg = `<svg viewBox="0 0 100 100" onload="alert(1)">
+    <script>alert('xss')</script>
+    <a href="javascript:alert(2)"><text>Click</text></a>
+    <foreignObject><div>Bad</div></foreignObject>
+    <path d="M10 10 H 90 V 90 H 10 L 10 10" fill="url(#grad1)" style="color: red;" onclick="evil()" />
+    <defs><linearGradient id="grad1"><stop offset="0%" stop-color="red"/></linearGradient></defs>
+  </svg>`;
+
+  const clean = sanitizeSvg(maliciousSvg);
+  assert.ok(clean.length > 0, 'Clean SVG should not be empty');
+  assert.ok(!clean.includes('script'), 'Should not contain script tag');
+  assert.ok(!clean.includes('onload'), 'Should not contain onload handler');
+  assert.ok(!clean.includes('onclick'), 'Should not contain onclick handler');
+  assert.ok(!clean.includes('foreignObject'), 'Should not contain foreignObject');
+  assert.ok(!clean.includes('javascript:'), 'Should not contain javascript: url');
+  assert.ok(clean.includes('<path') || clean.includes('path'), 'Should preserve safe path element');
+  assert.ok(clean.includes('id="grad1"'), 'Should preserve defs and gradient');
+});
+

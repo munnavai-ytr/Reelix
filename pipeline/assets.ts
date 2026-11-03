@@ -2,6 +2,9 @@
 import { ApiKeysService } from '../storage/keys';
 import { nativeFetch } from '../ai/http';
 import { AudioMixer } from '../engine/audio-mixer';
+import { OpfsService } from '../storage/opfs';
+import { encode16BitWav } from '../ai/whisper';
+import { SoundApisService } from '../lib/sound-apis';
 
 export async function resolveStockVideos(queries: string[]): Promise<string[]> {
   const keys = ApiKeysService.getKeys();
@@ -24,8 +27,18 @@ export async function resolveStockVideos(queries: string[]): Promise<string[]> {
           const files = res.data.videos[0].video_files;
           const match = files.find(f => f.quality === 'hd' || f.height >= 1080) || files[0];
           if (match?.link) {
-            resolved.push(match.link);
-            continue;
+            try {
+              const resVideo = await fetch(match.link);
+              if (resVideo.ok) {
+                const blob = await resVideo.blob();
+                const filename = `stock_pexels_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp4`;
+                const opfsUri = await OpfsService.writeFile(filename, blob);
+                resolved.push(opfsUri);
+                continue;
+              }
+            } catch (err) {
+              console.warn('[Assets] Pexels video download to OPFS failed:', err);
+            }
           }
         }
       } catch {
@@ -102,11 +115,6 @@ export async function resolveBackgroundMusic(mood: string, duration: number): Pr
     return '';
   }
 }
-
-import { OpfsService } from '../storage/opfs';
-import { encode16BitWav } from '../ai/whisper';
-import { SoundApisService } from '../lib/sound-apis';
-
 export function synthesizeProceduralSfx(type: 'whoosh' | 'pop' | 'hit' | 'ding'): Blob {
   const sampleRate = 44100;
   const norm = type.toLowerCase();
@@ -179,27 +187,52 @@ export async function resolveSfx(sfxTypes: string[]): Promise<Record<string, str
 
     if (map[rawType]) continue;
 
+    let opfsUri = '';
+
     // Try Freesound CC0 if key is present
     if (hasFreesound) {
       try {
         const results = await SoundApisService.searchFreesound(norm, true);
         if (results && results[0]?.previewUrl) {
-          map[rawType] = results[0].previewUrl;
-          continue;
+          const resAudio = await fetch(results[0].previewUrl);
+          if (resAudio.ok) {
+            const blob = await resAudio.blob();
+            // max 5 MB
+            if (blob.size <= 5 * 1024 * 1024) {
+              const filename = `sfx_freesound_${norm}_${Date.now()}.mp3`;
+              opfsUri = await OpfsService.writeFile(filename, blob);
+            }
+          }
         }
-      } catch {
-        // Fall back to built-in procedural SFX
+      } catch (err) {
+        console.warn(`[Assets] Freesound SFX download failed for ${norm}, falling back to synthesized SFX:`, err);
       }
     }
 
-    // Synthesize procedural SFX and write to local OPFS
+    // Fall back to built-in procedural SFX if Freesound was not downloaded
+    if (!opfsUri) {
+      try {
+        const blob = synthesizeProceduralSfx(norm);
+        const filename = `sfx_${norm}.wav`;
+        opfsUri = await OpfsService.writeFile(filename, blob);
+      } catch {
+        opfsUri = '';
+      }
+    }
+
+    map[rawType] = opfsUri;
+    map[norm] = opfsUri;
+  }
+
+  // Ensure default fallback 'whoosh' is always present
+  if (!map['whoosh']) {
     try {
-      const blob = synthesizeProceduralSfx(norm);
-      const filename = `sfx_${norm}.wav`;
+      const blob = synthesizeProceduralSfx('whoosh');
+      const filename = `sfx_whoosh.wav`;
       const uri = await OpfsService.writeFile(filename, blob);
-      map[rawType] = uri;
+      map['whoosh'] = uri;
     } catch {
-      map[rawType] = '';
+      map['whoosh'] = '';
     }
   }
 

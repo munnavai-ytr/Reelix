@@ -22,6 +22,7 @@ import { HapticsService } from '@/storage/haptics';
 import { GamificationService } from '@/storage/gamification';
 import { ShaderEngine } from '@/registry/shader-engine';
 import { toast } from './Toast';
+import { sanitizeSvg } from '@/lib/sanitize-svg';
 
 interface AiCreatorStudioProps {
   initialType?: CreatorItemType;
@@ -177,11 +178,13 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
 
     const category = categoryMap[selectedType];
     const itemId = generatedAsset.id || `custom_${Date.now()}`;
+    const cleanSvg = selectedType === 'sticker' ? sanitizeSvg(generatedAsset.svg || '') : undefined;
+    const assetToSave = cleanSvg !== undefined ? { ...generatedAsset, svg: cleanSvg } : generatedAsset;
 
     // Register into active in-memory registry
     if (selectedType === 'effect') {
       Registry.registerEffect({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
         render: (ctx: CanvasRenderingContext2D, _source: any, p: Record<string, any>) => {
           ctx.globalAlpha = p.intensity ?? 1.0;
@@ -189,19 +192,19 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
       });
     } else if (selectedType === 'transition') {
       Registry.registerTransition({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
         render: () => {},
       });
     } else if (selectedType === 'text-animation') {
       Registry.registerTextAnimation({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
         apply: () => ({ x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 }),
       });
     } else if (selectedType === 'caption-style') {
       Registry.registerCaptionStyle({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
         render: (ctx: CanvasRenderingContext2D, chunk: any, _time: number, baseColor: string) => {
           ctx.save();
@@ -212,12 +215,12 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
       });
     } else if (selectedType === 'sticker') {
       Registry.registerSticker({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
       });
     } else if (selectedType === 'template') {
       Registry.registerTemplate({
-        ...generatedAsset,
+        ...assetToSave,
         id: itemId,
       });
     }
@@ -225,21 +228,21 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
     // Persist into IndexedDB
     await LibraryDB.saveItem({
       id: itemId,
-      name: generatedAsset.name || 'Custom AI Asset',
+      name: assetToSave.name || 'Custom AI Asset',
       category,
-      tags: generatedAsset.tags || ['ai-created'],
+      tags: assetToSave.tags || ['ai-created'],
       isBuiltIn: false,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       author: 'ai-creator',
       source: 'ai-studio',
-      payload: generatedAsset,
+      payload: assetToSave,
     });
 
     GamificationService.recordAction('create_ai_item');
     setIsSaved(true);
-    onSaved?.(generatedAsset);
+    onSaved?.(assetToSave);
   };
 
   return (
@@ -421,7 +424,7 @@ export const AiCreatorStudio: React.FC<AiCreatorStudioProps> = ({
             {selectedType === 'sticker' && generatedAsset?.svg ? (
               <div
                 className="w-48 h-48 flex items-center justify-center"
-                dangerouslySetInnerHTML={{ __html: generatedAsset.svg }}
+                dangerouslySetInnerHTML={{ __html: sanitizeSvg(generatedAsset.svg) }}
               />
             ) : (
               <canvas

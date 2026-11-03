@@ -31,6 +31,7 @@ import { SoundApisService } from '@/lib/sound-apis';
 import { analyzeAudioBlob } from '@/lib/bpm-detector';
 import { OpfsService } from '@/storage/opfs';
 import { GamificationService } from '@/storage/gamification';
+import { sanitizeSvg } from '@/lib/sanitize-svg';
 
 interface LibraryTabProps {
   onSelectItem?: (item: any) => void;
@@ -483,7 +484,7 @@ export const LibraryTab: React.FC<LibraryTabProps> = ({ onSelectItem, onOpenCrea
                       {selectedCategory === 'stickers' && item.svg && (
                         <div
                           className="w-16 h-16 flex items-center justify-center"
-                          dangerouslySetInnerHTML={{ __html: item.svg }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeSvg(item.svg) }}
                         />
                       )}
 

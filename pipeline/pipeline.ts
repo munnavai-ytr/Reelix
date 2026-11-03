@@ -7,7 +7,7 @@ import { generateDirectorPlan } from '../ai/director';
 import { resolveStockVideos, resolveBackgroundMusic, resolveSfx } from './assets';
 import { EditPlan, AudioLayer, VideoLayer } from '../engine/types';
 import { AssetCache } from '../engine/renderer';
-import { ensureAssets } from '../engine/media';
+import { ensureAssets, releaseAssetCache } from '../engine/media';
 import { ApiKeysService } from '../storage/keys';
 import { OpfsService } from '../storage/opfs';
 import { ProjectDb } from '../storage/db';
@@ -226,13 +226,13 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     ) as AudioLayer[];
 
     if (sfxLayers.length > 0) {
-      const typesToResolve = sfxLayers.map((l) => l.name || 'whoosh');
+      const typesToResolve = sfxLayers.map((l) => l.sfxType || 'whoosh');
       try {
         const resolvedMap = await resolveSfx(typesToResolve);
         for (const l of sfxLayers) {
-          const type = l.name || 'whoosh';
+          const sfxType = l.sfxType || 'whoosh';
           if (!l.src || l.src.startsWith('sfx:')) {
-            l.src = resolvedMap[type] || resolvedMap['whoosh'] || '';
+            l.src = resolvedMap[sfxType] || resolvedMap['whoosh'] || '';
           }
         }
       } catch (e) {
@@ -255,9 +255,9 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Preloading canvas assets and saving project to IndexedDB...',
   });
 
-  let loadedAssets: AssetCache;
   try {
-    loadedAssets = await ensureAssets(plan);
+    const warmUpCache = await ensureAssets(plan);
+    releaseAssetCache(warmUpCache);
 
     await ProjectDb.saveProject({
       id: plan.id,
@@ -282,5 +282,5 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     detail: 'Complete! Your vertical Short is ready in the studio.',
   });
 
-  return { plan, assets: loadedAssets };
+  return { plan, assets: { videos: new Map(), images: new Map() } };
 }
