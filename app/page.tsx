@@ -19,11 +19,13 @@ import { ProjectList } from '@/ui/components/ProjectList';
 import { LibraryTab } from '@/ui/components/LibraryTab';
 import { AiCreatorStudio } from '@/ui/components/AiCreatorStudio';
 import { EditCopilot } from '@/ui/components/EditCopilot';
+import { AutoCaptionTool } from '@/ui/components/AutoCaptionTool';
 import { ToastProvider } from '@/ui/components/Toast';
 import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
 import {
   Sparkles,
   Film,
+  Subtitles,
   ArrowRight,
   Shield,
   Video,
@@ -231,6 +233,18 @@ export default function StudioPage() {
                           <span>{STRINGS.home.createButton}</span>
                         </button>
 
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('medium');
+                            setActiveTab('autocaption');
+                          }}
+                          className="px-5 py-3.5 rounded-2xl bg-[#191927] hover:bg-white/10 text-white font-semibold text-sm flex items-center gap-2 border border-cyan-500/30 hover:border-cyan-400 transition-colors touch-target"
+                        >
+                          <Subtitles className="w-4 h-4 text-cyan-400" />
+                          <span>Auto Caption</span>
+                        </button>
+
                         {currentPlan && (
                           <button
                             type="button"
@@ -274,6 +288,13 @@ export default function StudioPage() {
             {activeTab === 'create' && (
               <ErrorBoundary tabName="Create Wizard">
                 <CreateWizard />
+              </ErrorBoundary>
+            )}
+
+            {/* TAB: AUTO CAPTION TOOL */}
+            {activeTab === 'autocaption' && (
+              <ErrorBoundary tabName="Auto Caption Tool">
+                <AutoCaptionTool />
               </ErrorBoundary>
             )}
 

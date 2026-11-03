@@ -20,6 +20,7 @@ import {
   X,
   Volume2,
   AlertTriangle,
+  Subtitles,
 } from 'lucide-react';
 import { triggerHaptic } from '@/storage/haptics';
 import confetti from 'canvas-confetti';
@@ -467,19 +468,33 @@ export function CreateWizard() {
           </p>
         </div>
 
-        {/* Compact Pill Step Indicator */}
-        <div className="inline-flex items-center gap-1.5 p-1 rounded-full bg-[#12121C] border border-[#26263A] text-xs self-start sm:self-auto">
-          <span className="px-3 py-1 rounded-full brand-gradient text-white font-bold text-[11px] shadow-sm">
-            1 Media
-          </span>
-          <span className="text-[#8D8DA8]">·</span>
-          <span className="px-2.5 py-1 text-[#8D8DA8] font-medium text-[11px]">
-            2 Describe
-          </span>
-          <span className="text-[#8D8DA8]">·</span>
-          <span className="px-2.5 py-1 text-[#8D8DA8] font-medium text-[11px]">
-            3 Studio
-          </span>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light');
+              setActiveTab('autocaption');
+            }}
+            className="px-3 py-1 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <Subtitles className="w-3.5 h-3.5" />
+            <span>Auto Caption Video</span>
+          </button>
+
+          {/* Compact Pill Step Indicator */}
+          <div className="inline-flex items-center gap-1.5 p-1 rounded-full bg-[#12121C] border border-[#26263A] text-xs">
+            <span className="px-3 py-1 rounded-full brand-gradient text-white font-bold text-[11px] shadow-sm">
+              1 Media
+            </span>
+            <span className="text-[#8D8DA8]">·</span>
+            <span className="px-2.5 py-1 text-[#8D8DA8] font-medium text-[11px]">
+              2 Describe
+            </span>
+            <span className="text-[#8D8DA8]">·</span>
+            <span className="px-2.5 py-1 text-[#8D8DA8] font-medium text-[11px]">
+              3 Studio
+            </span>
+          </div>
         </div>
       </div>
 

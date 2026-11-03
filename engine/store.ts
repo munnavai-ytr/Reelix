@@ -13,7 +13,7 @@ export interface StudioState {
   currentTime: number;
   isPlaying: boolean;
   selectedLayerId: string | null;
-  activeTab: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'admin';
+  activeTab: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'admin' | 'autocaption';
   assets: AssetCache;
   assetVersion: number;
   history: EditPlan[];
@@ -34,7 +34,7 @@ export interface StudioState {
   setCurrentTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setSelectedLayerId: (id: string | null) => void;
-  setActiveTab: (tab: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'admin') => void;
+  setActiveTab: (tab: 'home' | 'create' | 'editor' | 'library' | 'creator' | 'projects' | 'settings' | 'admin' | 'autocaption') => void;
   setPipelineProgress: (progress: PipelineProgressEvent | null) => void;
   setIsExporting: (val: boolean) => void;
   setExportProgress: (prog: ExportProgress | null) => void;
