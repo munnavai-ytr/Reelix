@@ -271,7 +271,8 @@ export async function transcribeAudio(
   audioBlob: Blob,
   audioDuration?: number,
   knownScript?: string,
-  removeSilence = false
+  removeSilence = false,
+  minSilenceDuration = 0.35
 ): Promise<TranscriptionResult & { notice?: string; processedBlob?: Blob; processedDuration?: number }> {
   // Downmix to 16kHz mono WAV
   const { wavBuffer: initialWav, duration: decodedDuration, pcmData: initialPcm } =
@@ -284,7 +285,7 @@ export async function transcribeAudio(
   let noticeMsg: string | undefined = undefined;
 
   if (removeSilence) {
-    const { silences, speechSegments } = detectSilences(pcmData, 16000);
+    const { silences, speechSegments } = detectSilences(pcmData, 16000, 0.015, minSilenceDuration);
     if (speechSegments.length > 0 && silences.length > 0) {
       const totalSavedSec = silences.reduce((acc, s) => acc + (s.end - s.start), 0);
       const compacted = compactSpeechAudio(pcmData, 16000, speechSegments);

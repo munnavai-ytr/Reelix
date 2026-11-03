@@ -1,5 +1,5 @@
 // 6-Step Pipeline Orchestrator for Reelix One-Click Shorts Creator with detailed error visibility
-import { PipelineProgressEvent } from './types';
+import { PipelineProgressEvent, EditControls } from './types';
 import { ingestMediaInputs } from './ingest';
 import { transcribeAudio } from '../ai/whisper';
 import { analyzeVideoClipsWithGemini } from '../ai/clip-analysis';
@@ -19,6 +19,7 @@ export interface GenerateShortsOptions {
   imageFiles?: File[];
   musicFile?: File | Blob;
   removeSilence?: boolean;
+  controls?: EditControls;
   niche?: string;
   style?: string;
   captionStyle?: string;
@@ -58,15 +59,12 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     throw new Error(`Step 1 – Reading files: ${msg}`);
   }
 
-  // Check user prompt for silence keywords
+  // Check controls or user prompt for silence removal
+  const silenceMode = opts.controls?.silence.mode || (opts.removeSilence ? 'on' : 'auto');
+  const silenceMinSec = opts.controls?.silence.minSec ?? 0.45;
   const promptLower = (opts.userPrompt || '').toLowerCase();
-  const silenceRequested =
-    opts.removeSilence ||
-    promptLower.includes('silence') ||
-    promptLower.includes('pause') ||
-    promptLower.includes('gap') ||
-    promptLower.includes('dead air') ||
-    promptLower.includes('সাইলেন্স');
+  const asksSilence = ['silence', 'pause', 'gap', 'dead air', 'সাইলেন্স'].some((kw) => promptLower.includes(kw));
+  const silenceRequested = silenceMode === 'on' || (silenceMode === 'auto' && (opts.removeSilence || asksSilence));
 
   // STEP 2: TRANSCRIBE & SILENCE COMPACTION
   onProgress({
@@ -76,7 +74,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
     percentage: 32,
     title: silenceRequested ? 'Listening to Voice & Removing Silences' : 'Listening to Voice & Word Alignment',
     detail: silenceRequested
-      ? 'Detecting 20ms silence windows, compacting speech segments, and extracting verbatim words...'
+      ? `Detecting silences longer than ${silenceMinSec}s, compacting speech, and extracting verbatim words...`
       : 'Generating word-level timestamps and timing boundaries with Gemini...',
   });
 
@@ -90,7 +88,8 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
       ingested.audioBlob!,
       ingested.audioDuration,
       opts.scriptText,
-      silenceRequested
+      silenceRequested,
+      silenceMinSec
     );
 
     if (transcription.processedBlob && transcription.processedDuration) {
@@ -168,6 +167,7 @@ export async function runGeneratePipeline(opts: GenerateShortsOptions): Promise<
         captionStyle: opts.captionStyle,
         userPrompt: opts.userPrompt,
         language: opts.language,
+        controls: opts.controls,
         hasPexelsKey: !!(keys.pexels && keys.pexels.length > 5),
       },
       transcription.words

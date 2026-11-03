@@ -3,6 +3,8 @@ import { EditPlan, Layer, CaptionChunk, VideoLayer, ImageLayer, AudioLayer } fro
 import { DirectorRequest, DirectorResult } from './types';
 import { callGeminiJson } from './gemini';
 import { Registry } from '../registry';
+import { DEFAULT_EDIT_CONTROLS } from '../pipeline/types';
+import { getCutSpeedRange, enforceEditControls } from '../pipeline/enforce-controls';
 
 export interface RawAiScene {
   start?: number;
@@ -72,7 +74,7 @@ export function groupWordsIntoSentences(
  * 7-Step Robust Deterministic Timeline Scene Repair:
  * 1. Normalize AI scenes: sort by start, clamp to [0, D], drop empty
  * 2. Tile 0..D with no gaps/overlaps: scene[i].end = scene[i+1].start; first.start = 0; last.end = D
- * 3. Merge scenes < 1.2s into previous; split scenes > 5.5s into equal parts
+ * 3. Merge scenes < minCut into previous; split scenes > maxCut into equal parts (clamped by cutSpeed)
  * 4. Fill clip timing: moving cursor per clip; cursor wraps when cursor + dur > clipDur - 0.05
  * 5. If sceneDuration > clipDuration, split into clip-sized pieces looping from 0
  * 6. Validate effect/transition IDs against Registry
@@ -83,9 +85,11 @@ export function repairDirectorScenes(
   totalDuration: number,
   clipsMeta: Array<{ duration: number; focusPoint?: { x: number; y: number } }>,
   imagesCount: number,
-  mode: 'broll' | 'talking-head' = 'broll'
+  mode: 'broll' | 'talking-head' = 'broll',
+  cutSpeed: 'slow' | 'normal' | 'fast' = 'normal'
 ): RepairedScene[] {
   const D = Math.max(0.5, totalDuration);
+  const { min: minCut, max: maxCut } = getCutSpeedRange(cutSpeed);
 
   // 1. Normalize AI scenes
   let scenes: Array<{
@@ -121,8 +125,8 @@ export function repairDirectorScenes(
   }
 
   if (scenes.length === 0) {
-    // Generate default scenes roughly every 3.2 seconds
-    const targetDur = 3.2;
+    // Generate default scenes matching cutSpeed target
+    const targetDur = (minCut + maxCut) / 2;
     const count = Math.max(1, Math.round(D / targetDur));
     const step = D / count;
     for (let i = 0; i < count; i++) {
@@ -142,20 +146,20 @@ export function repairDirectorScenes(
   scenes[0].start = 0;
   for (let i = 0; i < scenes.length - 1; i++) {
     if (scenes[i].end <= scenes[i].start) {
-      scenes[i].end = scenes[i].start + 1.2;
+      scenes[i].end = scenes[i].start + minCut;
     }
     scenes[i + 1].start = scenes[i].end;
   }
   scenes[scenes.length - 1].end = D;
 
-  // 3. Merge scenes < 1.2s into previous; split scenes > 5.5s
-  if (D >= 1.2) {
+  // 3. Merge scenes < minCut into previous; split scenes > maxCut
+  if (D >= minCut) {
     let merged = true;
     while (merged && scenes.length > 1) {
       merged = false;
       for (let i = 0; i < scenes.length; i++) {
         const dur = scenes[i].end - scenes[i].start;
-        if (dur < 1.199 && scenes.length > 1) {
+        if (dur < minCut - 0.001 && scenes.length > 1) {
           if (i === 0) {
             scenes[1].start = 0;
             scenes.shift();
@@ -170,14 +174,14 @@ export function repairDirectorScenes(
     }
   }
 
-  // Split scenes > 5.5s
+  // Split scenes > maxCut
   let split = true;
   while (split) {
     split = false;
     for (let i = 0; i < scenes.length; i++) {
       const dur = scenes[i].end - scenes[i].start;
-      if (dur > 5.5) {
-        const parts = Math.ceil(dur / 3.5);
+      if (dur > maxCut + 0.001) {
+        const parts = Math.ceil(dur / maxCut);
         const partDur = dur / parts;
         const newPieces = [];
         for (let p = 0; p < parts; p++) {
@@ -262,7 +266,7 @@ export function repairDirectorScenes(
 
       // Update cursor for this clip
       let nextCursor = clipStart + sDur;
-      if (nextCursor + 1.2 > clipDur - 0.05) {
+      if (nextCursor + minCut > clipDur - 0.05) {
         nextCursor = 0;
       }
       clipCursors.set(clipIdx, nextCursor);
@@ -304,7 +308,8 @@ export async function generateDirectorPlan(
   words: Array<{ word: string; start: number; end: number }>
 ): Promise<DirectorResult> {
   const duration = Math.min(180, Math.max(3, req.voiceDuration || req.targetDuration || 30));
-  const rawCaptionStyle = req.captionStyle || 'karaoke-word-highlight';
+  const controls = req.controls || DEFAULT_EDIT_CONTROLS;
+  const rawCaptionStyle = controls.captions.styleId || req.captionStyle || 'karaoke-word-highlight';
   const captionStyle = Registry.getCaptionStyle(rawCaptionStyle) ? rawCaptionStyle : 'karaoke-word-highlight';
   const isTalkingHead = req.mode === 'talking-head';
 
@@ -358,7 +363,18 @@ export async function generateDirectorPlan(
   }).join('\n');
 
   const imageCount = req.userImageUris?.length || req.userImageUrls?.length || 0;
-  const userInstruction = req.userPrompt ? `USER EDIT INSTRUCTION (HIGHEST PRIORITY): "${req.userPrompt}"` : 'USER EDIT INSTRUCTION: Match clip moments to spoken words with high engagement.';
+  const userInstruction = req.userPrompt ? `USER EDIT INSTRUCTION (HIGHEST PRIORITY OVER SWITCHES): "${req.userPrompt}"` : 'USER EDIT INSTRUCTION: Match clip moments to spoken words with high engagement.';
+
+  const controlsSummary = `EXPLICIT SWITCHES (Do not add off items unless user prompt asks):
+- Silence Removal: ${controls.silence.mode} (minSec: ${controls.silence.minSec}s)
+- SFX: ${controls.sfx.mode} (level: ${controls.sfx.level})
+- Music: ${controls.music.mode} (vol: ${controls.music.volume}%, duck: ${controls.music.duck})
+- Hook Text: ${controls.hook}
+- Captions: ${controls.captions.mode} (style: ${controls.captions.styleId})
+- Effects: ${controls.effects.mode} (intensity: ${controls.effects.intensity})
+- Transitions: ${controls.transitions}
+- Cut Speed: ${controls.cutSpeed}
+- Color Look: ${controls.colorLook}`;
 
   const prompt = `You are Reelix Director, an elite AI director for vertical 9:16 Shorts (1080x1920).
 Create a professional edit plan that matches user video clips to the spoken words.
@@ -371,6 +387,8 @@ Available Clips Count: ${req.clipAnalysis?.clips?.length || req.userVideoUrls?.l
 Available Images Count: ${imageCount}
 
 ${userInstruction}
+
+${controlsSummary}
 
 SPOKEN SENTENCES & TIMINGS:
 ${sentenceSummary || req.script || 'Engaging voiceover narration'}
@@ -441,7 +459,7 @@ Return JSON strictly matching this schema:
     required: ['title', 'hookText', 'musicMood', 'scenes'],
   };
 
-  const systemInstruction = `Follow the user's instruction literally. For every scene pick the clip moment whose description best fits the words spoken during that time. Cut roughly every 2.5-4 seconds, faster for hype pacing. Use clipStart inside the real duration of that clip.`;
+  const systemInstruction = `Follow the user's instruction literally. What the user writes in prompt overrides any switch. For every scene pick the clip moment whose description best fits the words spoken during that time. Cut speed is ${controls.cutSpeed}. Use clipStart inside the real duration of that clip.`;
 
   try {
     const parsed = await callGeminiJson<RawAiPlan>(
@@ -470,13 +488,13 @@ export function assembleFullEditPlan(
   captionStyle: string,
   notices: string[] = []
 ): DirectorResult {
+  const controls = req.controls || DEFAULT_EDIT_CONTROLS;
   const planId = `plan_${Date.now()}`;
   const title = aiData.title || req.script?.slice(0, 32) || 'Reelix Short';
   const hookText = aiData.hookText || title;
   const musicMood = aiData.musicMood || (req.style === 'Viral High Energy' ? 'hype' : 'upbeat');
   const directorNotes = aiData.directorNotes || 'High energy vertical Short with synchronized visual cuts.';
 
-  // Read niche and style from req inside assembleFullEditPlan to avoid ReferenceError
   const niche = req.niche || 'General / Tech';
   const style = req.style || 'Viral High Energy';
 
@@ -501,8 +519,15 @@ export function assembleFullEditPlan(
   const imageUris = req.userImageUris && req.userImageUris.length > 0 ? req.userImageUris : req.userImageUrls || [];
   const imagesCount = imageUris.length;
 
-  // 3. REPAIR in code (always run, even if the AI answer is good)
-  const repairedScenes = repairDirectorScenes(aiData.scenes, totalDuration, clipsMeta, imagesCount, req.mode);
+  // 3. REPAIR in code with cutSpeed clamping
+  const repairedScenes = repairDirectorScenes(
+    aiData.scenes,
+    totalDuration,
+    clipsMeta,
+    imagesCount,
+    req.mode,
+    controls.cutSpeed
+  );
 
   const layers: Layer[] = [];
 
@@ -636,26 +661,26 @@ export function assembleFullEditPlan(
     startTime: 0,
     duration: totalDuration,
     src: musicSrc,
-    volume: 0.35,
+    volume: controls.music.volume / 100,
     fadeIn: 0.5,
     fadeOut: 1.0,
-    ducking: {
-      duckWhenVoiceOver: true,
-      duckVolume: 0.18,
-      attackMs: 150,
-      releaseMs: 350,
-    },
+    ducking: controls.music.duck
+      ? {
+          duckWhenVoiceOver: true,
+          duckVolume: 0.18,
+          attackMs: 150,
+          releaseMs: 350,
+        }
+      : undefined,
   });
 
-  // 4. SFX: add AudioLayer at each AI cue AND at every cut (whoosh), max 1 per 1.5s
+  // SFX cues
   const sfxCues: Array<{ time: number; type: 'whoosh' | 'pop' | 'hit' | 'ding' }> = [];
 
-  // Cut whooshes
   for (let i = 1; i < repairedScenes.length; i++) {
     sfxCues.push({ time: repairedScenes[i].start, type: 'whoosh' });
   }
 
-  // AI cues
   if (aiData.sfx && Array.isArray(aiData.sfx)) {
     for (const cue of aiData.sfx) {
       if (cue.time >= 0 && cue.time < totalDuration) {
@@ -666,7 +691,6 @@ export function assembleFullEditPlan(
 
   sfxCues.sort((a, b) => a.time - b.time);
 
-  // Enforce max 1 SFX per 1.5 seconds
   let lastSfxTime = -999;
   let sfxIdx = 0;
   for (const cue of sfxCues) {
@@ -687,7 +711,7 @@ export function assembleFullEditPlan(
     }
   }
 
-  const fullPlan: EditPlan = {
+  const rawPlan: EditPlan = {
     id: planId,
     title,
     duration: totalDuration,
@@ -707,6 +731,10 @@ export function assembleFullEditPlan(
     },
   };
 
+  // Enforce EditControls strictly (switches + user prompt overrides)
+  const enforcement = enforceEditControls(rawPlan, controls, req.userPrompt);
+  const combinedNotices = [...notices, ...enforcement.notices];
+
   const bRollQueries = [
     `${niche} cinematic b-roll`,
     'high energy motion background',
@@ -714,14 +742,14 @@ export function assembleFullEditPlan(
   ];
 
   return {
-    editPlan: fullPlan,
+    editPlan: enforcement.plan,
     bRollQueries,
     sfxQueries: ['whoosh', 'pop', 'hit', 'ding'],
     directorNotes,
     musicMood,
     hookText,
     sfx: sfxCues,
-    notices,
+    notices: combinedNotices,
   };
 }
 
@@ -747,3 +775,4 @@ function buildFallbackPlan(
     notices
   );
 }
+

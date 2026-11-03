@@ -201,5 +201,7 @@ export interface EditPlan {
     script?: string;
     voiceName?: string;
     directorNotes?: string;
+    appliedDecisions?: string[];
+    notices?: string[];
   };
 }

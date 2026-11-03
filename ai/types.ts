@@ -1,6 +1,7 @@
 // AI Provider Interface and Options for Reelix
 import { EditPlan } from '../engine/types';
 import { VideoAnalysisResult } from './clip-analysis';
+import { EditControls } from '../pipeline/types';
 
 export interface DirectorRequest {
   script?: string;
@@ -22,6 +23,7 @@ export interface DirectorRequest {
   userPrompt?: string;
   language?: string;
   hasPexelsKey?: boolean;
+  controls?: EditControls;
 }
 
 export interface DirectorResult {

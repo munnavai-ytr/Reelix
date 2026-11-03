@@ -31,11 +31,26 @@ import { STRINGS, useStrings, useLanguageStore } from '@/ui/strings';
 import { BRAND } from '@/ui/brand';
 import { EDIT_STYLE_PRESETS, EditStylePreset } from '@/ui/presets';
 import { ApiKeysService } from '@/storage/keys';
+import { EditControlsPanel } from './EditControlsPanel';
+import { EditControls, DEFAULT_EDIT_CONTROLS } from '@/pipeline/types';
 
 export function CreateWizard() {
   const strings = useStrings();
   const lang = useLanguageStore((s) => s.lang);
   const { setPipelineProgress, setPlan, setAssets, setActiveTab, setShowOnboarding } = useStudioStore();
+
+  // Edit Controls State
+  const [controls, setControls] = useState<EditControls>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('reelix_edit_controls');
+        if (saved) return JSON.parse(saved);
+      } catch {
+        // ignore
+      }
+    }
+    return DEFAULT_EDIT_CONTROLS;
+  });
 
   // Primary Voice & Media Inputs
   const [audioFile, setAudioFile] = useState<File | Blob | null>(null);
@@ -419,6 +434,7 @@ export function CreateWizard() {
         imageFiles: imageFiles.length > 0 ? imageFiles : undefined,
         musicFile: musicFile || undefined,
         removeSilence,
+        controls,
         language,
         niche,
         style,
@@ -1064,6 +1080,13 @@ export function CreateWizard() {
           )}
         </div>
       </div>
+
+      {/* CARD 6: COMPACT EDIT CONTROLS PANEL */}
+      <EditControlsPanel
+        controls={controls}
+        onChange={setControls}
+        onReset={() => setControls(DEFAULT_EDIT_CONTROLS)}
+      />
 
       {/* BOTTOM STICKY BAR / WIDE BUTTON */}
       <div className="space-y-2 pt-2">

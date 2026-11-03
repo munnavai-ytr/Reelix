@@ -17,6 +17,7 @@ import { useStudioStore } from '@/engine/store';
 import { ChatToChangeService } from '@/ai/chat-to-change';
 import { triggerHaptic } from '@/storage/haptics';
 import { toast } from './Toast';
+import { AppliedDecisionsCard } from './AppliedDecisionsCard';
 import { STRINGS } from '@/ui/strings';
 
 interface EditChangeItem {
@@ -238,13 +239,16 @@ export function EditCopilot({ isDocked = false, onClose }: EditCopilotProps) {
 
       {/* Content Body */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Applied Decisions Audit Card */}
+        <AppliedDecisionsCard />
+
         {/* Suggestion Chips */}
         <div className="space-y-1.5">
           <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-[#8D8DA8]">
             Quick Edits
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {suggestionChips.map((chip, idx) => (
+            {suggestionChips.map((chip: string, idx: number) => (
               <button
                 key={idx}
                 type="button"
